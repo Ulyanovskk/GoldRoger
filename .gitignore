@@ -1,0 +1,33 @@
+# Secrets — NE JAMAIS committer
+.env
+
+# Cache Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+
+# Environnements virtuels
+venv/
+.venv/
+env/
+.env_backup
+
+# Logs (potentiellement sensibles)
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# OS
+.DS_Store
+Thumbs.db
