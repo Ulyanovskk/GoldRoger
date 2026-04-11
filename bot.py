@@ -372,6 +372,28 @@ async def cmd_balance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await update.message.reply_text(msg, parse_mode="HTML")
 
 
+async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/help — Affiche l'aide et la liste des commandes."""
+    if not _is_authorized(update): return
+    msg = (
+        "📖 <b>GUIDE DES COMMANDES</b>\n\n"
+        "<b>🕹️ Base :</b>\n"
+        "/start, /stop, /pause, /status, /help\n\n"
+        "<b>📊 Trading :</b>\n"
+        "/analyze - Analyser maintenant\n"
+        "/trades - Positions ouvertes\n"
+        "/balance - Solde MT5\n"
+        "/close &lt;ticket&gt; - Fermer un trade\n"
+        "/breakeven &lt;ticket&gt; - Sécuriser\n\n"
+        "<b>⚙️ Tactique :</b>\n"
+        "/mode &lt;safe|normal|aggro&gt;\n"
+        "/setrisk &lt;%&gt;, /setconf &lt;%&gt;, /clearstats\n\n"
+        "<b>🔍 Système :</b>\n"
+        "/news, /log, /panic"
+    )
+    await update.message.reply_text(msg, parse_mode="HTML")
+
+
 async def cmd_trades(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/trades — Liste les trades ouverts."""
     if not _is_authorized(update):
@@ -558,6 +580,7 @@ def main() -> None:
     app.add_handler(CommandHandler("stop",    cmd_stop))
     app.add_handler(CommandHandler("pause",   cmd_pause))
     app.add_handler(CommandHandler("status",  cmd_status))
+    app.add_handler(CommandHandler("help",    cmd_help))
     app.add_handler(CommandHandler("balance", cmd_balance))
     app.add_handler(CommandHandler("trades",  cmd_trades))
     app.add_handler(CommandHandler("log",     cmd_log))
