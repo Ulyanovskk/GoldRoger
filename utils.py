@@ -803,6 +803,68 @@ def monitor_open_trades() -> list:
         return []
 
 
+def _fetch_trade_result(ticket: int) -> Optional[dict]:
+    """Récupère le profit et les pips d'une position fermée depuis l'historique."""
+    try:
+        import MetaTrader5 as mt5
+        # On définit une fenêtre de temps large pour l'historique (dernières 24h)
+        from_date = datetime.datetime.now() - datetime.timedelta(days=1)
+        deals = mt5.history_deals_get(from_date, datetime.datetime.now(), position=ticket)
+        
+        if deals is None or len(deals) < 2:
+            return None
+        
+        # Le deal d'entrée est le premier, le deal de sortie est le dernier
+        # On calcule le profit total cumulé des deals pour cette position
+        total_profit = sum(d.profit + d.commission + d.swap for d in deals)
+        
+        # Calcul des pips (différence entre deal d'entrée et de sortie)
+        entry_deal = [d for d in deals if d.entry == mt5.DEAL_ENTRY_IN][0]
+        exit_deal = [d for d in deals if d.entry == mt5.DEAL_ENTRY_OUT][0]
+        
+        diff = abs(entry_deal.price - exit_deal.price)
+        # Estimation pips pour BTC : 1 point = 1 USD
+        pips = diff 
+        
+        return {"profit": total_profit, "pips": pips}
+    except Exception as exc:
+        bot_log.error("Exception _fetch_trade_result pour ticket #%d : %s", ticket, exc)
+        return None
+
+
+def check_and_alert_closed_trades(known_tickets: list[int]) -> list[int]:
+    """
+    Vérifie si des tickets suivis ont été clôturés (TP, SL ou manuel).
+    Envoie une alerte Telegram et retourne la liste des tickets restants.
+    """
+    try:
+        current_positions = get_open_positions()
+        current_tickets = [p.ticket for p in current_positions]
+        
+        still_open = []
+        for ticket in known_tickets:
+            if ticket not in current_tickets:
+                # Le trade a été fermé !
+                res = _fetch_trade_result(ticket)
+                if res:
+                    alert_trade_close(ticket, res['profit'], res['pips'])
+                else:
+                    # Alerte simplifiée si l'historique n'est pas encore à jour
+                    send_telegram(f"ℹ️ <b>POSITION FERMÉE</b>\nTicket : #{ticket}")
+            else:
+                still_open.append(ticket)
+        
+        # On ajoute les nouveaux tickets qui n'étaient pas encore suivis
+        for t in current_tickets:
+            if t not in still_open:
+                still_open.append(t)
+                
+        return still_open
+    except Exception as exc:
+        bot_log.error("Exception check_and_alert_closed_trades : %s", exc)
+        return known_tickets
+
+
 # ══════════════════════════════════════════════════════════════
 # 9. TELEGRAM — ALERTES ASYNCHRONES
 # ══════════════════════════════════════════════════════════════

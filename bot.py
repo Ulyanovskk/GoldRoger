@@ -44,6 +44,7 @@ class BotState:
         self.profit_today:   float = 0.0
         self.start_balance:  float = 0.0
         self.daily_summary_sent: bool = False
+        self.known_tickets: list[int] = []
         self._lock = asyncio.Lock()
 
     async def set_status(self, new_status: str) -> None:
@@ -169,6 +170,23 @@ async def trading_cycle() -> None:
         state.profit_today = account.equity - state.start_balance
 
     utils.bot_log.info("═══ Fin du cycle ═══")
+
+
+async def monitoring_loop() -> None:
+    """
+    Boucle haute fréquence (toutes les 10s) pour surveiller 
+    uniquement la fermeture des trades (TP/SL).
+    """
+    utils.bot_log.info("Boucle de surveillance (TP/SL) démarrée.")
+    while True:
+        try:
+            if state.is_active() and utils.mt5_ensure_connected():
+                # Vérifie et alerte si des positions ont été fermées
+                state.known_tickets = utils.check_and_alert_closed_trades(state.known_tickets)
+        except Exception as exc:
+            utils.bot_log.error("Erreur dans monitoring_loop : %s", exc)
+        
+        await asyncio.sleep(10)  # Check toutes les 10 secondes
 
 
 # ══════════════════════════════════════════════════════════════
@@ -392,6 +410,9 @@ def _run_trading_loop(loop: asyncio.AbstractEventLoop) -> None:
     """
     asyncio.set_event_loop(loop)
     try:
+        # Lancement de la surveillance haute fréquence en arrière-plan
+        loop.create_task(monitoring_loop())
+        # Lancement de la boucle principale de trading (cycle 15 min)
         loop.run_until_complete(main_loop())
     except Exception as exc:
         utils.bot_log.critical("Erreur fatale dans la boucle de trading : %s", exc, exc_info=True)
