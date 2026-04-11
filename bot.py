@@ -175,13 +175,18 @@ async def trading_cycle() -> None:
 async def monitoring_loop() -> None:
     """
     Boucle haute fréquence (toutes les 10s) pour surveiller 
-    uniquement la fermeture des trades (TP/SL).
+    la fermeture des trades (TP/SL) et la gestion active (BE/Trailing).
     """
-    utils.bot_log.info("Boucle de surveillance (TP/SL) démarrée.")
+    utils.bot_log.info("Boucle de surveillance (Gestion Active + TP/SL) démarrée.")
     while True:
         try:
             if state.is_active() and utils.mt5_ensure_connected():
-                # Vérifie et alerte si des positions ont été fermées
+                # 1. Récupérer les positions pour la gestion active
+                positions = utils.get_open_positions()
+                for p in positions:
+                    utils.process_active_trade_management(p)
+
+                # 2. Vérifier si des positions ont été fermées (TP/SL/Manuel)
                 state.known_tickets = utils.check_and_alert_closed_trades(state.known_tickets)
         except Exception as exc:
             utils.bot_log.error("Erreur dans monitoring_loop : %s", exc)

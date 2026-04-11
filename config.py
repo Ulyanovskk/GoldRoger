@@ -62,6 +62,15 @@ MAX_SIMULTANEOUS_TRADES: int = int(os.getenv("MAX_SIMULTANEOUS_TRADES", "2"))
 MIN_RR: float = 1.5  # Ratio risque/rendement minimum accepté
 
 # ──────────────────────────────────────────────
+# Gestion Active des Positions (Nouveau)
+# ──────────────────────────────────────────────
+USE_PARTIAL_CLOSE: bool = True     # Fermer 50% au premier palier
+PARTIAL_CLOSE_PCT: float = 0.5     # À 50% de l'objectif TP
+USE_BREAK_EVEN: bool = True        # Déplacer SL au prix d'entrée après TP1
+USE_TRAILING_STOP: bool = True     # Activer le stop suiveur
+TRAILING_STOP_DISTANCE_ATR: float = 2.0  # Distance du stop (en multiples de l'ATR)
+
+# ──────────────────────────────────────────────
 # Cycle principal
 # ──────────────────────────────────────────────
 CYCLE_INTERVAL_MINUTES: int = 15  # Aligné sur M15

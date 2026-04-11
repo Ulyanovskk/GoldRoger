@@ -791,6 +791,121 @@ def close_all_positions() -> int:
     return closed
 
 
+def modify_position_sl(ticket: int, new_sl: float) -> bool:
+    """Modifie le Stop Loss d'une position ouverte."""
+    try:
+        request = {
+            "action": mt5.TRADE_ACTION_SLTP,
+            "position": ticket,
+            "sl": round(new_sl, 2),
+        }
+        # On garde le TP actuel s'il existe
+        pos = mt5.positions_get(ticket=ticket)
+        if pos:
+            request["tp"] = pos[0].tp
+            request["symbol"] = pos[0].symbol
+        
+        result = mt5.order_send(request)
+        if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+            bot_log.info("SL modifié pour #%d -> %.2f", ticket, new_sl)
+            return True
+        return False
+    except Exception as exc:
+        bot_log.error("Exception modify_position_sl #%d : %s", ticket, exc)
+        return False
+
+
+def partial_close_position(ticket: int, pct: float = 0.5) -> bool:
+    """Ferme un pourcentage du volume d'une position."""
+    try:
+        pos = mt5.positions_get(ticket=ticket)
+        if not pos:
+            return False
+        pos = pos[0]
+        
+        symbol = pos.symbol
+        volume = pos.volume
+        close_vol = round(volume * pct, 2)
+        if close_vol < 0.01:
+            return False
+
+        tick = mt5.symbol_info_tick(symbol)
+        close_price = tick.bid if pos.type == mt5.ORDER_TYPE_BUY else tick.ask
+        close_type = mt5.ORDER_TYPE_SELL if pos.type == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY
+
+        request = {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "symbol": symbol,
+            "volume": close_vol,
+            "type": close_type,
+            "position": ticket,
+            "price": close_price,
+            "deviation": 20,
+            "magic": config.MT5_MAGIC,
+            "comment": pos.comment + "|PC", # Marqueur Partial Close
+            "type_time": mt5.ORDER_TIME_GTC,
+            "type_filling": mt5.ORDER_FILLING_IOC,
+        }
+        result = mt5.order_send(request)
+        if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+            bot_log.info("Clôture partielle effectuée pour #%d (%.2f lots)", ticket, close_vol)
+            return True
+        return False
+    except Exception as exc:
+        bot_log.error("Exception partial_close_position #%d : %s", ticket, exc)
+        return False
+
+
+def process_active_trade_management(pos) -> None:
+    """Applique le Breakeven, Partial Close et Trailing Stop sur une position."""
+    try:
+        ticket = pos.ticket
+        price_open = pos.price_open
+        current_price = pos.price_current
+        sl_current = pos.sl
+        tp_current = pos.tp
+        is_buy = pos.type == mt5.ORDER_TYPE_BUY
+        
+        # 1. Calcul de la progression vers le TP
+        dist_total = abs(tp_current - price_open)
+        if dist_total == 0: return
+        
+        dist_actuelle = (current_price - price_open) if is_buy else (price_open - current_price)
+        progression = dist_actuelle / dist_total
+
+        # 2. Clôture Partielle + Break-even (TP1)
+        if config.USE_PARTIAL_CLOSE and "|PC" not in pos.comment:
+            if progression >= config.PARTIAL_CLOSE_PCT:
+                if partial_close_position(ticket):
+                    send_telegram(f"✅ <b>TP1 ATTEINT — #{ticket}</b>\nClôture partielle effectuée.")
+                    if config.USE_BREAK_EVEN:
+                        # On met le SL un poil au dessus/dessous du prix d'entrée pour couvrir les fees
+                        new_sl = price_open + (0.5 if is_buy else -0.5) 
+                        if modify_position_sl(ticket, new_sl):
+                            send_telegram(f"🛡 <b>BREAK-EVEN — #{ticket}</b>\nStop Loss déplacé au prix d'entrée.")
+
+        # 3. Trailing Stop (uniquement après le Break-even si activé)
+        if config.USE_TRAILING_STOP and progression > 0.2: # Commence après 20% de profit seulement
+            # On récupère l'ATR M15 pour la distance
+            rates = mt5.copy_rates_from_pos(pos.symbol, mt5.TIMEFRAME_M15, 0, 15)
+            if rates is not None and len(rates) > 0:
+                df = pd.DataFrame(rates)
+                atr = ta.volatility.AverageTrueRange(df['high'], df['low'], df['close']).average_true_range().iloc[-1]
+                dist_trail = atr * config.TRAILING_STOP_DISTANCE_ATR
+                
+                if is_buy:
+                    target_sl = current_price - dist_trail
+                    if target_sl > sl_current + (atr * 0.5): # On ne bouge que si le gain est significatif (> 0.5 ATR)
+                        modify_position_sl(ticket, target_sl)
+                else:
+                    target_sl = current_price + dist_trail
+                    if target_sl < sl_current - (atr * 0.5) or sl_current == 0:
+                        modify_position_sl(ticket, target_sl)
+
+    except Exception as exc:
+        bot_log.error("Erreur process_active_trade_management #%d : %s", pos.ticket, exc)
+
+
 def monitor_open_trades() -> list:
     """
     Vérifie l'état des positions ouvertes.
