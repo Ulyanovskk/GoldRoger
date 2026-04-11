@@ -62,6 +62,20 @@ MAX_SIMULTANEOUS_TRADES: int = int(os.getenv("MAX_SIMULTANEOUS_TRADES", "2"))
 MIN_RR: float = 1.5  # Ratio risque/rendement minimum accepté
 
 # ──────────────────────────────────────────────
+# Risque Dynamique (Nouveau)
+# ──────────────────────────────────────────────
+USE_DYNAMIC_RISK: bool = True
+MIN_RISK_PCT: float = 0.5   # Risque min pour CONF = MIN_CONFIDENCE
+MAX_RISK_PCT: float = 2.5   # Risque max pour CONF = 100
+
+# ──────────────────────────────────────────────
+# Filtre Volatilité ATR (Nouveau)
+# ──────────────────────────────────────────────
+# Le bot refuse de trader si l'ATR est hors de ces bornes (exprimé en USD pour BTC)
+ATR_MIN_THRESHOLD: float = 50.0   # Marché trop plat
+ATR_MAX_THRESHOLD: float = 2500.0 # Marché trop volatil (news)
+
+# ──────────────────────────────────────────────
 # Gestion Active des Positions (Nouveau)
 # ──────────────────────────────────────────────
 USE_PARTIAL_CLOSE: bool = True     # Fermer 50% au premier palier

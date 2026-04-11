@@ -478,6 +478,13 @@ def pre_ia_filter(data: dict) -> tuple[bool, str]:
     if not are_timeframes_aligned(data):
         return False, "Timeframes non alignés (M15/H1/H4)"
 
+    # Volatilité ATR (Nouveau)
+    atr = data["M15"]["ind"]["atr"]
+    if atr < config.ATR_MIN_THRESHOLD:
+        return False, f"Volatilité trop faible (ATR={atr:.1f} < {config.ATR_MIN_THRESHOLD})"
+    if atr > config.ATR_MAX_THRESHOLD:
+        return False, f"Volatilité trop élevée (ATR={atr:.1f} > {config.ATR_MAX_THRESHOLD})"
+
     return True, ""
 
 
@@ -567,15 +574,29 @@ def _parse_deepseek_response(raw: str) -> Optional[dict]:
 # 7. GARDE-FOUS RISQUE
 # ══════════════════════════════════════════════════════════════
 
-def calculate_lot_size(balance: float, sl_pips: float) -> float:
+def calculate_lot_size(balance: float, sl_pips: float, confidence: int = 85) -> float:
     """
-    Calcule la taille de lot basée sur le risque en pourcentage.
-    Pour BTCUSDm : calcul basé sur la valeur du point du broker.
+    Calcule la taille de lot avec risque dynamique basé sur la confiance.
     """
     try:
-        risk_usd = balance * config.RISK_PERCENT / 100
+        # Calcul du pourcentage de risque dynamique
+        if config.USE_DYNAMIC_RISK:
+            # Interpolation linéaire entre MIN_RISK et MAX_RISK selon la confiance
+            conf_range = 100 - config.MIN_CONFIDENCE
+            if conf_range <= 0: conf_range = 1
+            
+            progress = (confidence - config.MIN_CONFIDENCE) / conf_range
+            progress = max(0, min(1, progress)) # Borné entre 0 et 1
+            
+            risk_pct = config.MIN_RISK_PCT + (progress * (config.MAX_RISK_PCT - config.MIN_RISK_PCT))
+        else:
+            risk_pct = config.RISK_PERCENT
+
+        risk_usd = balance * risk_pct / 100
+        
         if sl_pips <= 0:
             return 0.01
+
         # Calcul générique : 1 lot = contract_size, 1 point = tick_size
         symbol_info = mt5.symbol_info(config.MT5_SYMBOL)
         if symbol_info is None:
@@ -585,8 +606,14 @@ def calculate_lot_size(balance: float, sl_pips: float) -> float:
         point_value = symbol_info.trade_tick_value / symbol_info.trade_tick_size
         lot = risk_usd / (sl_pips * point_value)
         lot = round(lot, 2)
-        lot = max(0.01, min(lot, 10.0))  # Entre 0.01 et 10 lots
-        return lot
+        
+        # Log du risque appliqué
+        bot_log.info("Risque calculé : %.2f%% (Conf=%d) -> Lot: %.2f", risk_pct, confidence, lot)
+        
+        return max(0.01, min(lot, 10.0))
+    except Exception as exc:
+        bot_log.error("Exception calculate_lot_size : %s", exc)
+        return 0.01
     except Exception as exc:
         bot_log.error("Exception calculate_lot_size : %s", exc)
         return 0.01
@@ -621,9 +648,9 @@ def validate_signal(signal: dict, balance: float, current_price: float) -> tuple
             if signal["TP"] >= current_price:
                 return False, signal, f"TP={signal['TP']} >= prix={current_price} pour SELL"
 
-        # Recalcul du lot selon le risque réel
+        # Recalcul du lot selon le risque réel (dynamique)
         sl_pips = abs(current_price - signal["SL"])
-        max_lot = calculate_lot_size(balance, sl_pips)
+        max_lot = calculate_lot_size(balance, sl_pips, confidence=signal["CONF"])
         if signal["LOT"] > max_lot:
             bot_log.warning(
                 "LOT IA (%s) > max calculé (%s), recalibrage.", signal["LOT"], max_lot
