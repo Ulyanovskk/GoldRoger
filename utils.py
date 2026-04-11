@@ -135,7 +135,7 @@ _TF_MAP = {
 
 def get_ohlcv(timeframe_name: str, n: int = config.CANDLES_COUNT) -> Optional[pd.DataFrame]:
     """
-    Récupère n bougies OHLCV pour XAUUSD sur le timeframe donné.
+    Récupère n bougies OHLCV pour BTCUSDm sur le timeframe donné.
     Retourne un DataFrame pandas ou None en cas d'erreur.
     """
     try:
@@ -349,10 +349,10 @@ def get_current_session() -> str:
 def compress_data(data: dict) -> str:
     """
     Compresse toutes les données multi-timeframe en une chaîne < 120 tokens.
-    Format : XAU|M15:...|H1:...|H4:...|D1:...|bal=...|sess=...
+    Format : BTC|M15:...|H1:...|H4:...|D1:...|bal=...|sess=...
     """
     try:
-        parts = ["XAU"]
+        parts = ["BTC"]
 
         def tf_str(tf: str) -> str:
             ind = data[tf]["ind"]
@@ -570,16 +570,20 @@ def _parse_deepseek_response(raw: str) -> Optional[dict]:
 def calculate_lot_size(balance: float, sl_pips: float) -> float:
     """
     Calcule la taille de lot basée sur le risque en pourcentage.
-    Pour XAUUSD : 1 pip ≈ 0.1 USD par micro-lot (0.01).
-    Valeur pip XAUUSD : 1 pip = 1 USD pour 1 lot standard.
+    Pour BTCUSDm : calcul basé sur la valeur du point du broker.
     """
     try:
         risk_usd = balance * config.RISK_PERCENT / 100
         if sl_pips <= 0:
             return 0.01
-        # Pour XAUUSD : 1 lot = 100 oz, 1 pip = $1 (si prix en USD)
-        # Valeur pip = 1 USD/pip/lot
-        lot = risk_usd / (sl_pips * 1.0)
+        # Calcul générique : 1 lot = contract_size, 1 point = tick_size
+        symbol_info = mt5.symbol_info(config.MT5_SYMBOL)
+        if symbol_info is None:
+            return 0.01
+        
+        # Valeur du risque par point pour 1 lot
+        point_value = symbol_info.trade_tick_value / symbol_info.trade_tick_size
+        lot = risk_usd / (sl_pips * point_value)
         lot = round(lot, 2)
         lot = max(0.01, min(lot, 10.0))  # Entre 0.01 et 10 lots
         return lot
@@ -642,7 +646,7 @@ def validate_signal(signal: dict, balance: float, current_price: float) -> tuple
 # ══════════════════════════════════════════════════════════════
 
 def get_symbol_info() -> Optional[object]:
-    """Récupère les informations du symbole XAUUSD."""
+    """Récupère les informations du symbole BTCUSDm."""
     try:
         info = mt5.symbol_info(config.MT5_SYMBOL)
         if info is None:
@@ -665,7 +669,7 @@ def execute_trade(signal: dict) -> Optional[dict]:
 
         tick = mt5.symbol_info_tick(config.MT5_SYMBOL)
         if tick is None:
-            bot_log.error("Impossible de récupérer le tick XAUUSD")
+            bot_log.error("Impossible de récupérer le tick BTCUSDm")
             return None
 
         order_type = mt5.ORDER_TYPE_BUY if signal["DIR"] == "BUY" else mt5.ORDER_TYPE_SELL

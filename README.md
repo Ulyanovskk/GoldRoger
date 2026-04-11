@@ -1,6 +1,6 @@
-# 🏴‍☠️ GoldRoger — XAUUSD AI Trading Bot
+# 🏴‍☠️ GoldRoger — BTCUSDm AI Trading Bot
 
-GoldRoger est un bot de trading automatique spécialisé sur l'or (XAUUSD), propulsé par l'IA **DeepSeek** et intégré à **MetaTrader 5**.
+GoldRoger est un bot de trading automatique spécialisé sur le Bitcoin (BTCUSDm), propulsé par l'IA **DeepSeek** et intégré à **MetaTrader 5**.
 
 ## 🚀 Fonctionnalités
 - **Analyse Multi-Timeframe** : M15, H1, H4, D1.

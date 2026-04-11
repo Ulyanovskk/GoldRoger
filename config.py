@@ -19,8 +19,8 @@ DEEPSEEK_TIMEOUT: int = 30  # secondes
 
 # Prompt système fixe (optimisé tokens)
 DEEPSEEK_SYSTEM_PROMPT: str = (
-    "Expert XAUUSD trader. Analyze data, respond ONLY in this exact format:\n"
-    "DIR=BUY|LOT=0.02|TP=2334|SL=2318|CONF=87|RR=1.8|REASON=3w\n"
+    "Expert BTCUSDm trader. Analyze data, respond ONLY in this exact format:\n"
+    "DIR=BUY|LOT=0.01|TP=75000|SL=65000|CONF=87|RR=1.5|REASON=3w\n"
     "DIR: BUY/SELL/WAIT. LOT: calculated on balance+risk. "
     "CONF: confidence 0-100. RR: risk/reward ratio. "
     "REASON: max 3 words. No other text."
@@ -38,7 +38,7 @@ TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID", "")
 MT5_LOGIN: int = int(os.getenv("MT5_LOGIN", "0"))
 MT5_PASSWORD: str = os.getenv("MT5_PASSWORD", "")
 MT5_SERVER: str = os.getenv("MT5_SERVER", "")
-MT5_SYMBOL: str = "XAUUSD"
+MT5_SYMBOL: str = "BTCUSDm"
 MT5_MAGIC: int = 20240115  # Identifiant unique du bot
 
 # Timeframes utilisés pour l'analyse multi-temporelle
