@@ -17,13 +17,15 @@ DEEPSEEK_URL: str = "https://api.deepseek.com/v1/chat/completions"
 DEEPSEEK_MODEL: str = "deepseek-chat"
 DEEPSEEK_TIMEOUT: int = 30  # secondes
 
+# Corrélation et Sentiment
+ETH_SYMBOL: str = "ETHUSDm"
+NEWS_FEED_URL: str = "https://cryptopanic.com/api/v1/posts/?kind=news&public=true"
+
 # Prompt système fixe (optimisé tokens)
 DEEPSEEK_SYSTEM_PROMPT: str = (
-    "Expert BTCUSDm trader. Analyze data, respond ONLY in this exact format:\n"
+    "Expert BTCUSDm trader. Analyze technicals, ETH correlation and news. Respond ONLY in this exact format:\n"
     "DIR=BUY|LOT=0.01|TP=75000|SL=65000|CONF=87|RR=1.5|REASON=3w\n"
-    "DIR: BUY/SELL/WAIT. LOT: calculated on balance+risk. "
-    "CONF: confidence 0-100. RR: risk/reward ratio. "
-    "REASON: max 3 words. No other text."
+    "DIR: BUY/SELL/WAIT. CONF: 0-100. REASON: max 3 words. No other text."
 )
 
 # ──────────────────────────────────────────────

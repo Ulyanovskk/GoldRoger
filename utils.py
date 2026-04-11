@@ -346,6 +346,36 @@ def get_current_session() -> str:
     return "+".join(sessions) if sessions else "Off"
 
 
+def fetch_eth_data() -> str:
+    """Récupère la variation 24h de l'ETH en format compact."""
+    try:
+        rates = mt5.copy_rates_from_pos(config.ETH_SYMBOL, mt5.TIMEFRAME_D1, 0, 1)
+        if rates is not None and len(rates) > 0:
+            change = (rates[0]['close'] - rates[0]['open']) / rates[0]['open'] * 100
+            return f"ETH:{'+' if change > 0 else ''}{change:.1f}%"
+        return "ETH:?"
+    except:
+        return "ETH:?"
+
+
+def fetch_market_news() -> str:
+    """Récupère les 3 derniers titres de news crypto (format ultra-compact)."""
+    try:
+        # On utilise une requête simple sur CryptoPanic
+        resp = requests.get(config.NEWS_FEED_URL, timeout=5)
+        if resp.status_code == 200:
+            results = resp.json().get("results", [])[:3]
+            titles = []
+            for r in results:
+                # On ne garde que les 3 premiers mots du titre pour économiser les tokens
+                short_title = "_".join(r["title"].split()[:3]).replace("'", "").replace("\"", "")
+                titles.append(short_title)
+            return f"news:{','.join(titles)}"
+        return "news:?"
+    except:
+        return "news:?"
+
+
 def compress_data(data: dict) -> str:
     """
     Compresse toutes les données multi-timeframe en une chaîne < 120 tokens.
@@ -390,6 +420,11 @@ def compress_data(data: dict) -> str:
 
         parts.append(f"bal={int(data['balance'])}USD")
         parts.append(f"sess={get_current_session()}")
+        
+        # Corrélation et News (Nouveau)
+        parts.append(fetch_eth_data())
+        parts.append(fetch_market_news())
+        
         parts.append(f"price={data['current_price']}")
 
         return "|".join(parts)
