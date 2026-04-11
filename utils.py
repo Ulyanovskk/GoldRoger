@@ -649,23 +649,22 @@ def calculate_lot_size(balance: float, sl_pips: float, confidence: int = 85) -> 
     except Exception as exc:
         bot_log.error("Exception calculate_lot_size : %s", exc)
         return 0.01
-    except Exception as exc:
-        bot_log.error("Exception calculate_lot_size : %s", exc)
-        return 0.01
 
 
-def validate_signal(signal: dict, balance: float, current_price: float) -> tuple[bool, dict, str]:
+def validate_signal(signal: dict, balance: float, current_price: float, 
+                    min_conf: int = None, max_risk: float = None) -> tuple[bool, dict, str]:
     """
     Applique tous les garde-fous risque sur le signal DeepSeek.
-    Retourne (valide, signal_corrigé, raison_rejet).
+    Supporte les overrides dynamiques min_conf et max_risk.
     """
     try:
         if signal["DIR"] == "WAIT":
             return False, signal, "Direction WAIT : aucun trade"
 
-        # Confiance minimale
-        if signal["CONF"] < config.MIN_CONFIDENCE:
-            return False, signal, f"Confiance insuffisante ({signal['CONF']} < {config.MIN_CONFIDENCE})"
+        # Confiance minimale (dynamique ou config)
+        effective_min_conf = min_conf if min_conf is not None else config.MIN_CONFIDENCE
+        if signal["CONF"] < effective_min_conf:
+            return False, signal, f"Confiance insuffisante ({signal['CONF']} < {effective_min_conf})"
 
         # Ratio risque/rendement
         if signal["RR"] < config.MIN_RR:
@@ -685,7 +684,17 @@ def validate_signal(signal: dict, balance: float, current_price: float) -> tuple
 
         # Recalcul du lot selon le risque réel (dynamique)
         sl_pips = abs(current_price - signal["SL"])
+        
+        # Override dynamique du risque max si présent
+        old_max_risk = config.MAX_RISK_PCT
+        if max_risk is not None:
+            config.MAX_RISK_PCT = max_risk
+            
         max_lot = calculate_lot_size(balance, sl_pips, confidence=signal["CONF"])
+        
+        # On remet la config d'origine (optionnel car BotState gère l'override à chaque appel)
+        config.MAX_RISK_PCT = old_max_risk
+
         if signal["LOT"] > max_lot:
             bot_log.warning(
                 "LOT IA (%s) > max calculé (%s), recalibrage.", signal["LOT"], max_lot
@@ -1040,6 +1049,41 @@ def check_and_alert_closed_trades(known_tickets: list[int]) -> list[int]:
     except Exception as exc:
         bot_log.error("Exception check_and_alert_closed_trades : %s", exc)
         return known_tickets
+
+
+def close_position_by_ticket(ticket: int) -> bool:
+    """Ferme une position spécifique par son ticket."""
+    try:
+        pos = mt5.positions_get(ticket=ticket)
+        if not pos:
+            return False
+        pos = pos[0]
+        
+        tick = mt5.symbol_info_tick(pos.symbol)
+        close_price = tick.bid if pos.type == mt5.ORDER_TYPE_BUY else tick.ask
+        close_type = mt5.ORDER_TYPE_SELL if pos.type == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY
+
+        request = {
+            "action":       mt5.TRADE_ACTION_DEAL,
+            "symbol":       pos.symbol,
+            "volume":       pos.volume,
+            "type":         close_type,
+            "position":     pos.ticket,
+            "price":        close_price,
+            "deviation":    20,
+            "magic":        config.MT5_MAGIC,
+            "comment":      "LOGBOT|MANUAL_CLOSE",
+            "type_time":    mt5.ORDER_TIME_GTC,
+            "type_filling": mt5.ORDER_FILLING_IOC,
+        }
+        result = mt5.order_send(request)
+        if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+            bot_log.info("Position #%d fermée manuellement via Telegram.", ticket)
+            return True
+        return False
+    except Exception as e:
+        bot_log.error("Erreur close_position_by_ticket #%d : %s", ticket, e)
+        return False
 
 
 # ══════════════════════════════════════════════════════════════

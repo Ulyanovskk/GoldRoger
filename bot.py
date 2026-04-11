@@ -41,10 +41,12 @@ class BotState:
         self.status: str = self.STOPPED
         # Statistiques journalières
         self.trades_today:   int   = 0
-        self.profit_today:   float = 0.0
         self.start_balance:  float = 0.0
         self.daily_summary_sent: bool = False
         self.known_tickets: list[int] = []
+        # Réglages dynamiques (overrides de config.py)
+        self.max_risk_pct: float = config.MAX_RISK_PCT
+        self.min_confidence: int = config.MIN_CONFIDENCE
         self._lock = asyncio.Lock()
 
     async def set_status(self, new_status: str) -> None:
@@ -117,6 +119,10 @@ async def trading_cycle() -> None:
     if not ok:
         utils.bot_log.info("Filtre pré-IA → SKIP : %s", reason)
         return
+    
+    # On transmet les réglages dynamiques (modifiés via Telegram)
+    data["min_confidence"] = state.min_confidence
+    data["max_risk_pct"] = state.max_risk_pct
 
     utils.bot_log.info("Filtre pré-IA → OK")
 
@@ -136,7 +142,8 @@ async def trading_cycle() -> None:
 
     # ── 6. Garde-fous + exécution ────────────────────────────────
     valid, signal_checked, reject_reason = utils.validate_signal(
-        signal_raw, data["balance"], data["current_price"]
+        signal_raw, data["balance"], data["current_price"],
+        min_conf=state.min_confidence, max_risk=state.max_risk_pct
     )
 
     if not valid:
@@ -388,6 +395,103 @@ async def cmd_log(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(f"<pre>{chunk}</pre>", parse_mode="HTML")
 
 
+async def cmd_setrisk(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/setrisk <float> — Change le risque dynamique max."""
+    if not _is_authorized(update) or not context.args: return
+    try:
+        new_risk = float(context.args[0])
+        if 0.1 <= new_risk <= 5.0:
+            state.max_risk_pct = new_risk
+            await update.message.reply_text(f"🎯 Risque max mis à jour : <b>{new_risk}%</b>", parse_mode="HTML")
+        else:
+            await update.message.reply_text("❌ Valeur invalide (doit être entre 0.1 et 5.0)")
+    except ValueError:
+        await update.message.reply_text("❌ Format : /setrisk 1.5")
+
+async def cmd_setconf(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/setconf <int> — Change la confiance min."""
+    if not _is_authorized(update) or not context.args: return
+    try:
+        new_conf = int(context.args[0])
+        if 50 <= new_conf <= 100:
+            state.min_confidence = new_conf
+            await update.message.reply_text(f"🧠 Confiance min mise à jour : <b>{new_conf}%</b>", parse_mode="HTML")
+        else:
+            await update.message.reply_text("❌ Valeur invalide (entre 50 et 100)")
+    except ValueError:
+        await update.message.reply_text("❌ Format : /setconf 85")
+
+async def cmd_mode(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/mode <safe|normal|aggro> — Profils de risque prédéfinis."""
+    if not _is_authorized(update) or not context.args: return
+    mode = context.args[0].lower()
+    if mode == "safe":
+        state.max_risk_pct, state.min_confidence = 0.5, 95
+    elif mode == "normal":
+        state.max_risk_pct, state.min_confidence = 1.5, 87
+    elif mode == "aggro":
+        state.max_risk_pct, state.min_confidence = 3.0, 80
+    else:
+        await update.message.reply_text("❌ Modes valides : safe, normal, aggro")
+        return
+    await update.message.reply_text(f"🎭 Mode <b>{mode.upper()}</b> activé\n(Risque {state.max_risk_pct}% | Confiance {state.min_confidence}%)", parse_mode="HTML")
+
+async def cmd_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/analyze — Force un cycle de trading immédiat."""
+    if not _is_authorized(update): return
+    await update.message.reply_text("🔍 Analyse immédiate demandée...")
+    await trading_cycle()
+
+async def cmd_panic(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/panic — Arrêt total, tout ferme, bot stoppé."""
+    if not _is_authorized(update): return
+    await state.set_status(BotState.STOPPED)
+    closed = utils.close_all_positions()
+    await update.message.reply_text(f"🚨 <b>PANIC BUTTON ACTIVATED</b>\nPositions fermées : {closed}\nBot stoppé.", parse_mode="HTML")
+
+async def cmd_close(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/close <ticket> — Ferme un trade spécifique."""
+    if not _is_authorized(update) or not context.args: return
+    try:
+        ticket = int(context.args[0])
+        if utils.close_position_by_ticket(ticket):
+            await update.message.reply_text(f"✅ Position #{ticket} fermée.")
+        else:
+            await update.message.reply_text(f"❌ Impossible de fermer #{ticket}.")
+    except ValueError:
+        await update.message.reply_text("❌ Format : /close 123456")
+
+async def cmd_breakeven(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/breakeven <ticket> — Passe un trade en sécurité."""
+    if not _is_authorized(update) or not context.args: return
+    try:
+        ticket = int(context.args[0])
+        import MetaTrader5 as mt5
+        pos = mt5.positions_get(ticket=ticket)
+        if pos:
+            if utils.modify_position_sl(ticket, pos[0].price_open):
+                await update.message.reply_text(f"🛡 Position #{ticket} mise à Break-even.")
+            else:
+                await update.message.reply_text(f"❌ Échec modification #{ticket}.")
+        else:
+            await update.message.reply_text("❌ Position introuvable.")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Erreur : {e}")
+
+async def cmd_news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/news — Affiche les dernières actualités suivies."""
+    if not _is_authorized(update): return
+    news = utils.fetch_market_news()
+    await update.message.reply_text(f"🌍 <b>FIL D'ACTUALITÉ :</b>\n{news}", parse_mode="HTML")
+
+async def cmd_clearstats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/clearstats — Reset les stats journalières."""
+    if not _is_authorized(update): return
+    state.trades_today = 0
+    state.profit_today = 0.0
+    await update.message.reply_text("🧹 Statistiques journalières réinitialisées.")
+
+
 def _is_authorized(update: Update) -> bool:
     """
     Vérifie que la commande provient du TELEGRAM_CHAT_ID autorisé.
@@ -457,6 +561,17 @@ def main() -> None:
     app.add_handler(CommandHandler("balance", cmd_balance))
     app.add_handler(CommandHandler("trades",  cmd_trades))
     app.add_handler(CommandHandler("log",     cmd_log))
+    
+    # Nouvelles commandes tactiques
+    app.add_handler(CommandHandler("setrisk",    cmd_setrisk))
+    app.add_handler(CommandHandler("setconf",    cmd_setconf))
+    app.add_handler(CommandHandler("mode",       cmd_mode))
+    app.add_handler(CommandHandler("analyze",    cmd_analyze))
+    app.add_handler(CommandHandler("panic",      cmd_panic))
+    app.add_handler(CommandHandler("close",      cmd_close))
+    app.add_handler(CommandHandler("breakeven",  cmd_breakeven))
+    app.add_handler(CommandHandler("news",       cmd_news))
+    app.add_handler(CommandHandler("clearstats", cmd_clearstats))
 
     # ── Notification de démarrage (HTTP synchrone) ──────────────
     import MetaTrader5 as mt5
