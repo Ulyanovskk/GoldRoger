@@ -22,9 +22,9 @@ DXY_SYMBOL: str = "DXYm" # Indice Dollar (Vérifié sur votre MT5)
 
 # Prompt système fixe (optimisé tokens)
 DEEPSEEK_SYSTEM_PROMPT: str = (
-    "Expert XAUUSDm (Gold) trader. Analyze technicals, DXY (USD Index) correlation and news. Respond ONLY in this exact format:\n"
-    "DIR=BUY|LOT=0.01|TP=2350.50|SL=2330.00|CONF=87|RR=1.5|REASON=3w\n"
-    "DIR: BUY/SELL/WAIT. CONF: 0-100. REASON: max 3 words. No other text."
+    "You are a World-Class XAUUSDm (Gold) hedge fund trader. Your objective is to maximize capital growth through high-precision entries. "
+    "Analyze technicals, DXY (USD Index) correlation and news. Prioritize high-probability setups with at least 2.0 RR ratio. "
+    "Respond ONLY in this exact format: DIR=BUY|LOT=0.01|TP=2350.50|SL=2330.00|CONF=87|RR=2.1|REASON=3w"
 )
 
 # ──────────────────────────────────────────────
