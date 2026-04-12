@@ -18,7 +18,7 @@ DEEPSEEK_MODEL: str = "deepseek-chat"
 DEEPSEEK_TIMEOUT: int = 30  # secondes
 
 # Corrélation et Sentiment
-ETH_SYMBOL: str = "ETHUSDm"
+DXY_SYMBOL: str = "USDX" # Indice Dollar (vérifiez si c'est USDX, DXY ou DXm chez votre broker)
 NEWS_FEED_URL: str = "https://cryptopanic.com/api/v1/posts/?kind=news&public=true"
 
 # Prompt système fixe (optimisé tokens)
@@ -55,10 +55,10 @@ MT5_TIMEFRAMES: dict = {
 CANDLES_COUNT: int = 200
 
 # ──────────────────────────────────────────────
-# Gestion du risque
+# Gestion du risque (STRICTE 1.5%)
 # ──────────────────────────────────────────────
-RISK_PERCENT: float = float(os.getenv("RISK_PERCENT", "1.5"))
-MAX_DAILY_DRAWDOWN: float = float(os.getenv("MAX_DAILY_DRAWDOWN", "3.0"))
+RISK_PERCENT: float = 1.5
+MAX_DAILY_DRAWDOWN: float = 3.0
 MIN_CONFIDENCE: int = int(os.getenv("MIN_CONFIDENCE", "85"))
 MAX_SIMULTANEOUS_TRADES: int = int(os.getenv("MAX_SIMULTANEOUS_TRADES", "2"))
 MIN_RR: float = 1.5  # Ratio risque/rendement minimum accepté
@@ -66,7 +66,7 @@ MIN_RR: float = 1.5  # Ratio risque/rendement minimum accepté
 # ──────────────────────────────────────────────
 # Risque Dynamique (Nouveau)
 # ──────────────────────────────────────────────
-USE_DYNAMIC_RISK: bool = True
+USE_DYNAMIC_RISK: bool = False
 MIN_RISK_PCT: float = 0.5   # Risque min pour CONF = MIN_CONFIDENCE
 MAX_RISK_PCT: float = 2.5   # Risque max pour CONF = 100
 
@@ -74,8 +74,15 @@ MAX_RISK_PCT: float = 2.5   # Risque max pour CONF = 100
 # Filtre Volatilité ATR (Nouveau)
 # ──────────────────────────────────────────────
 # Le bot refuse de trader si l'ATR est hors de ces bornes (exprimé en USD pour Gold)
-ATR_MIN_THRESHOLD: float = 0.50   # Marché trop plat (ex: 50 pips)
-ATR_MAX_THRESHOLD: float = 15.0   # Marché trop volatil (ex: 1500 pips)
+ATR_MIN_THRESHOLD: float = 0.50
+ATR_MAX_THRESHOLD: float = 15.0
+
+# ──────────────────────────────────────────────
+# Filtres de Protection (Spread & Calendrier)
+# ──────────────────────────────────────────────
+MAX_SPREAD_POINTS: int = 50       # 5.0 pips (évite la nuit et les news)
+BLOCK_NEWS_IMPORTANCE: int = 3    # 3 = Haute importance (NFP, CPI, Fed)
+NEWS_CHECK_WINDOW_MINS: int = 60  # Bloque 1h avant/après une news majeure
 
 # ──────────────────────────────────────────────
 # Gestion Active des Positions (Nouveau)

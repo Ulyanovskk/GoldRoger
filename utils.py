@@ -346,7 +346,34 @@ def get_current_session() -> str:
     return "+".join(sessions) if sessions else "Off"
 
 
-# Fonction fetch_eth_data supprimée car non pertinente pour XAUUSD (Or)
+def fetch_dxy_data() -> str:
+    """Récupère la tendance 24h de l'Indice Dollar (DXY)."""
+    try:
+        rates = mt5.copy_rates_from_pos(config.DXY_SYMBOL, mt5.TIMEFRAME_D1, 0, 1)
+        if rates is not None and len(rates) > 0:
+            change = (rates[0]['close'] - rates[0]['open']) / rates[0]['open'] * 100
+            return f"DXY:{'+' if change > 0 else ''}{change:.2f}%"
+        return "DXY:?"
+    except:
+        return "DXY:?"
+
+def is_high_impact_news() -> tuple[bool, str]:
+    """Vérifie si une news économique majeure approche ou vient de passer."""
+    try:
+        now = datetime.datetime.now(datetime.timezone.utc)
+        start = now - datetime.timedelta(minutes=config.NEWS_CHECK_WINDOW_MINS)
+        end = now + datetime.timedelta(minutes=config.NEWS_CHECK_WINDOW_MINS)
+        
+        # Récupération des événements du calendrier MT5
+        events = mt5.calendar_get(time_from=int(start.timestamp()), time_to=int(end.timestamp()))
+        if events:
+            for ev in events:
+                if ev.importance >= config.BLOCK_NEWS_IMPORTANCE and ev.currency in ("USD", "XAU"):
+                    return True, ev.name
+        return False, ""
+    except Exception as e:
+        bot_log.error("Erreur calendrier MT5 : %s", e)
+        return False, ""
 
 
 def fetch_market_news() -> str:
@@ -412,7 +439,8 @@ def compress_data(data: dict) -> str:
         parts.append(f"bal={int(data['balance'])}USD")
         parts.append(f"sess={get_current_session()}")
         
-        # News (Nouveau)
+        # Dollar Index + News (Crucial pour Gold)
+        parts.append(fetch_dxy_data())
         parts.append(fetch_market_news())
         
         parts.append(f"price={data['current_price']}")
@@ -503,12 +531,23 @@ def pre_ia_filter(data: dict) -> tuple[bool, str]:
     if not are_timeframes_aligned(data):
         return False, "Timeframes non alignés (M15/H1/H4)"
 
-    # Volatilité ATR (Nouveau)
+    # Volatilité ATR
     atr = data["M15"]["ind"]["atr"]
     if atr < config.ATR_MIN_THRESHOLD:
-        return False, f"Volatilité trop faible (ATR={atr:.1f} < {config.ATR_MIN_THRESHOLD})"
+        return False, f"Volatilité trop faible (ATR={atr:.1f})"
     if atr > config.ATR_MAX_THRESHOLD:
-        return False, f"Volatilité trop élevée (ATR={atr:.1f} > {config.ATR_MAX_THRESHOLD})"
+        return False, f"Volatilité trop élevée (ATR={atr:.1f})"
+
+    # FILTRES DE SÉCURITÉ SUPPLÉMENTAIRES (Or)
+    # 1. Spread
+    tick = mt5.symbol_info_tick(config.MT5_SYMBOL)
+    if tick and tick.spread > config.MAX_SPREAD_POINTS:
+        return False, f"Spread trop élevé ({tick.spread} pts)"
+
+    # 2. Calendrier Économique
+    is_news, news_name = is_high_impact_news()
+    if is_news:
+        return False, f"News majeure : {news_name}"
 
     return True, ""
 
