@@ -23,7 +23,7 @@ NEWS_FEED_URL: str = "https://cryptopanic.com/api/v1/posts/?kind=news&public=tru
 
 # Prompt système fixe (optimisé tokens)
 DEEPSEEK_SYSTEM_PROMPT: str = (
-    "Expert XAUUSDm (Gold) trader. Analyze technicals and news. Respond ONLY in this exact format:\n"
+    "Expert XAUUSDm (Gold) trader. Analyze technicals, DXY (USD Index) correlation and news. Respond ONLY in this exact format:\n"
     "DIR=BUY|LOT=0.01|TP=2350.50|SL=2330.00|CONF=87|RR=1.5|REASON=3w\n"
     "DIR: BUY/SELL/WAIT. CONF: 0-100. REASON: max 3 words. No other text."
 )

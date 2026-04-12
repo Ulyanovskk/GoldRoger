@@ -404,7 +404,7 @@ def fetch_market_news() -> str:
 def compress_data(data: dict) -> str:
     """
     Compresse toutes les données multi-timeframe en une chaîne < 120 tokens.
-    Format : BTC|M15:...|H1:...|H4:...|D1:...|bal=...|sess=...
+    Format : XAU|M15:...|H1:...|H4:...|D1:...|bal=...|sess=...
     """
     try:
         parts = ["XAU"]
