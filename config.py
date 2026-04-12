@@ -23,7 +23,7 @@ NEWS_FEED_URL: str = "https://cryptopanic.com/api/v1/posts/?kind=news&public=tru
 
 # Prompt système fixe (optimisé tokens)
 DEEPSEEK_SYSTEM_PROMPT: str = (
-    "Expert XAUUSD (Gold) trader. Analyze technicals and news. Respond ONLY in this exact format:\n"
+    "Expert XAUUSDm (Gold) trader. Analyze technicals and news. Respond ONLY in this exact format:\n"
     "DIR=BUY|LOT=0.01|TP=2350.50|SL=2330.00|CONF=87|RR=1.5|REASON=3w\n"
     "DIR: BUY/SELL/WAIT. CONF: 0-100. REASON: max 3 words. No other text."
 )
@@ -40,7 +40,7 @@ TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID", "")
 MT5_LOGIN: int = int(os.getenv("MT5_LOGIN", "0"))
 MT5_PASSWORD: str = os.getenv("MT5_PASSWORD", "")
 MT5_SERVER: str = os.getenv("MT5_SERVER", "")
-MT5_SYMBOL: str = "XAUUSD"
+MT5_SYMBOL: str = "XAUUSDm"
 MT5_MAGIC: int = 20240115  # Identifiant unique du bot
 
 # Timeframes utilisés pour l'analyse multi-temporelle
