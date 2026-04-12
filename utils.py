@@ -377,20 +377,27 @@ def is_high_impact_news() -> tuple[bool, str]:
 
 
 def fetch_market_news() -> str:
-    """Récupère les 3 derniers titres de news crypto (format ultra-compact)."""
+    """Récupère les prochains événements économiques majeurs via MT5 (USD/XAU)."""
     try:
-        # On utilise une requête simple sur CryptoPanic
-        resp = requests.get(config.NEWS_FEED_URL, timeout=5)
-        if resp.status_code == 200:
-            results = resp.json().get("results", [])[:3]
-            titles = []
-            for r in results:
-                # On ne garde que les 3 premiers mots du titre pour économiser les tokens
-                short_title = "_".join(r["title"].split()[:3]).replace("'", "").replace("\"", "")
-                titles.append(short_title)
-            return f"news:{','.join(titles)}"
-        return "news:?"
-    except:
+        now = datetime.datetime.now(datetime.timezone.utc)
+        # On regarde les prochaines 24 heures
+        end = now + datetime.timedelta(hours=24)
+        
+        events = mt5.calendar_get(time_from=int(now.timestamp()), time_to=int(end.timestamp()))
+        if events:
+            # On filtre les news de moyenne et haute importance pour USD et Or
+            important = [ev for ev in events if ev.importance >= 2 and ev.currency in ("USD", "XAU")]
+            if important:
+                lines = []
+                for ev in important[:3]:
+                    ev_time = datetime.datetime.fromtimestamp(ev.time, datetime.timezone.utc).strftime("%H:%M")
+                    # Un format très court pour Telegram
+                    lines.append(f"• {ev_time} {ev.name}")
+                return "\n".join(lines)
+        
+        return "Aucune annonce majeure prévue (24h)."
+    except Exception as e:
+        bot_log.error("Erreur fetch_market_news : %s", e)
         return "news:?"
 
 
