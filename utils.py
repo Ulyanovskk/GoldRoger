@@ -661,7 +661,8 @@ def calculate_lot_size(balance: float, sl_pips: float, confidence: int = 85) -> 
             
             risk_pct = config.MIN_RISK_PCT + (progress * (config.MAX_RISK_PCT - config.MIN_RISK_PCT))
         else:
-            risk_pct = config.RISK_PERCENT
+            # Utilise le risque constant défini par l'utilisateur (via /setrisk ou config)
+            risk_pct = config.MAX_RISK_PCT
 
         risk_usd = balance * risk_pct / 100
         
