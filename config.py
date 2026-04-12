@@ -60,7 +60,7 @@ RISK_PERCENT: float = 1.5
 MAX_DAILY_DRAWDOWN: float = 3.0
 MIN_CONFIDENCE: int = int(os.getenv("MIN_CONFIDENCE", "85"))
 MAX_SIMULTANEOUS_TRADES: int = int(os.getenv("MAX_SIMULTANEOUS_TRADES", "2"))
-MIN_RR: float = 1.5  # Ratio risque/rendement minimum accepté
+MIN_RR: float = 2.0  # Ratio risque/rendement minimum accepté (X2 gain vs risque)
 
 # ──────────────────────────────────────────────
 # Risque Dynamique (Nouveau)
