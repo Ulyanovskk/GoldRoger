@@ -135,7 +135,7 @@ _TF_MAP = {
 
 def get_ohlcv(timeframe_name: str, n: int = config.CANDLES_COUNT) -> Optional[pd.DataFrame]:
     """
-    Récupère n bougies OHLCV pour BTCUSDm sur le timeframe donné.
+    Récupère n bougies OHLCV pour le symbole configuré (ex: XAUUSD) sur le timeframe donné.
     Retourne un DataFrame pandas ou None en cas d'erreur.
     """
     try:
@@ -346,16 +346,7 @@ def get_current_session() -> str:
     return "+".join(sessions) if sessions else "Off"
 
 
-def fetch_eth_data() -> str:
-    """Récupère la variation 24h de l'ETH en format compact."""
-    try:
-        rates = mt5.copy_rates_from_pos(config.ETH_SYMBOL, mt5.TIMEFRAME_D1, 0, 1)
-        if rates is not None and len(rates) > 0:
-            change = (rates[0]['close'] - rates[0]['open']) / rates[0]['open'] * 100
-            return f"ETH:{'+' if change > 0 else ''}{change:.1f}%"
-        return "ETH:?"
-    except:
-        return "ETH:?"
+# Fonction fetch_eth_data supprimée car non pertinente pour XAUUSD (Or)
 
 
 def fetch_market_news() -> str:
@@ -382,7 +373,7 @@ def compress_data(data: dict) -> str:
     Format : BTC|M15:...|H1:...|H4:...|D1:...|bal=...|sess=...
     """
     try:
-        parts = ["BTC"]
+        parts = ["XAU"]
 
         def tf_str(tf: str) -> str:
             ind = data[tf]["ind"]
@@ -421,8 +412,7 @@ def compress_data(data: dict) -> str:
         parts.append(f"bal={int(data['balance'])}USD")
         parts.append(f"sess={get_current_session()}")
         
-        # Corrélation et News (Nouveau)
-        parts.append(fetch_eth_data())
+        # News (Nouveau)
         parts.append(fetch_market_news())
         
         parts.append(f"price={data['current_price']}")
@@ -717,7 +707,7 @@ def validate_signal(signal: dict, balance: float, current_price: float,
 # ══════════════════════════════════════════════════════════════
 
 def get_symbol_info() -> Optional[object]:
-    """Récupère les informations du symbole BTCUSDm."""
+    """Récupère les informations du symbole configuré."""
     try:
         info = mt5.symbol_info(config.MT5_SYMBOL)
         if info is None:
@@ -740,7 +730,7 @@ def execute_trade(signal: dict) -> Optional[dict]:
 
         tick = mt5.symbol_info_tick(config.MT5_SYMBOL)
         if tick is None:
-            bot_log.error("Impossible de récupérer le tick BTCUSDm")
+            bot_log.error("Impossible de récupérer le tick %s", config.MT5_SYMBOL)
             return None
 
         order_type = mt5.ORDER_TYPE_BUY if signal["DIR"] == "BUY" else mt5.ORDER_TYPE_SELL

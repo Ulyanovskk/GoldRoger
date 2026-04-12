@@ -23,8 +23,8 @@ NEWS_FEED_URL: str = "https://cryptopanic.com/api/v1/posts/?kind=news&public=tru
 
 # Prompt système fixe (optimisé tokens)
 DEEPSEEK_SYSTEM_PROMPT: str = (
-    "Expert BTCUSDm trader. Analyze technicals, ETH correlation and news. Respond ONLY in this exact format:\n"
-    "DIR=BUY|LOT=0.01|TP=75000|SL=65000|CONF=87|RR=1.5|REASON=3w\n"
+    "Expert XAUUSD (Gold) trader. Analyze technicals and news. Respond ONLY in this exact format:\n"
+    "DIR=BUY|LOT=0.01|TP=2350.50|SL=2330.00|CONF=87|RR=1.5|REASON=3w\n"
     "DIR: BUY/SELL/WAIT. CONF: 0-100. REASON: max 3 words. No other text."
 )
 
@@ -40,7 +40,7 @@ TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID", "")
 MT5_LOGIN: int = int(os.getenv("MT5_LOGIN", "0"))
 MT5_PASSWORD: str = os.getenv("MT5_PASSWORD", "")
 MT5_SERVER: str = os.getenv("MT5_SERVER", "")
-MT5_SYMBOL: str = "BTCUSDm"
+MT5_SYMBOL: str = "XAUUSD"
 MT5_MAGIC: int = 20240115  # Identifiant unique du bot
 
 # Timeframes utilisés pour l'analyse multi-temporelle
@@ -73,9 +73,9 @@ MAX_RISK_PCT: float = 2.5   # Risque max pour CONF = 100
 # ──────────────────────────────────────────────
 # Filtre Volatilité ATR (Nouveau)
 # ──────────────────────────────────────────────
-# Le bot refuse de trader si l'ATR est hors de ces bornes (exprimé en USD pour BTC)
-ATR_MIN_THRESHOLD: float = 50.0   # Marché trop plat
-ATR_MAX_THRESHOLD: float = 2500.0 # Marché trop volatil (news)
+# Le bot refuse de trader si l'ATR est hors de ces bornes (exprimé en USD pour Gold)
+ATR_MIN_THRESHOLD: float = 0.50   # Marché trop plat (ex: 50 pips)
+ATR_MAX_THRESHOLD: float = 15.0   # Marché trop volatil (ex: 1500 pips)
 
 # ──────────────────────────────────────────────
 # Gestion Active des Positions (Nouveau)
