@@ -41,6 +41,7 @@ class BotState:
         self.status: str = self.STOPPED
         # Statistiques journalières
         self.trades_today:   int   = 0
+        self.profit_today:   float = 0.0
         self.start_balance:  float = 0.0
         self.daily_summary_sent: bool = False
         self.known_tickets: list[int] = []
@@ -196,7 +197,8 @@ async def monitoring_loop() -> None:
                 # 2. Vérifier si des positions ont été fermées (TP/SL/Manuel)
                 state.known_tickets = utils.check_and_alert_closed_trades(state.known_tickets)
         except Exception as exc:
-            utils.bot_log.error("Erreur dans monitoring_loop : %s", exc)
+            utils.bot_log.error("Erreur critique dans monitoring_loop : %s", exc)
+            await asyncio.sleep(30) # Plus long délai en cas de crash répété
         
         await asyncio.sleep(10)  # Check toutes les 10 secondes
 
@@ -214,42 +216,50 @@ async def main_loop() -> None:
                        config.CYCLE_INTERVAL_MINUTES)
 
     while True:
-        # ── Résumé journalier à 23h00 ───────────────────────────
-        now = datetime.datetime.now()
-        if now.hour == config.DAILY_SUMMARY_HOUR and not state.daily_summary_sent:
-            import MetaTrader5 as mt5
-            account = mt5.account_info()
-            if account:
-                utils.alert_daily_summary(
-                    account.balance, account.equity,
-                    state.trades_today, state.profit_today
-                )
-            state.daily_summary_sent = True
-            state.trades_today  = 0
-            state.profit_today  = 0.0
-            state.start_balance = account.balance if account else 0.0
-        elif now.hour != config.DAILY_SUMMARY_HOUR:
-            state.daily_summary_sent = False  # Réinitialisé pour le lendemain
-
-        # ── Cycle de trading avec watchdog ──────────────────────
         try:
+            # ── Résumé journalier à 23h00 ───────────────────────────
+            now = datetime.datetime.now()
+            if now.hour == config.DAILY_SUMMARY_HOUR and not state.daily_summary_sent:
+                try:
+                    import MetaTrader5 as mt5
+                    account = mt5.account_info()
+                    if account:
+                        utils.alert_daily_summary(
+                            account.balance, account.equity,
+                            state.trades_today, state.profit_today
+                        )
+                    state.daily_summary_sent = True
+                    state.trades_today  = 0
+                    state.profit_today  = 0.0
+                    state.start_balance = account.balance if account else 0.0
+                except Exception as e:
+                    utils.bot_log.error("Erreur lors de la génération du résumé journalier : %s", e)
+
+            elif now.hour != config.DAILY_SUMMARY_HOUR:
+                state.daily_summary_sent = False  # Réinitialisé pour le lendemain
+
+            # ── Cycle de trading ─────────────────────────────────────
             await trading_cycle()
+
         except Exception as exc:
             tb = traceback.format_exc()
-            utils.bot_log.error("Exception non gérée dans trading_cycle :\n%s", tb)
-            utils.alert_error(f"Watchdog déclenché :\n<code>{str(exc)[:300]}</code>")
+            utils.bot_log.error("ERREUR CRITIQUE dans main_loop :\n%s", tb)
+            utils.alert_error(f"⚠️ Watchdog main_loop relancé après erreur :\n<code>{str(exc)[:200]}</code>")
+            await asyncio.sleep(10) # Petit délai avant de reprendre
 
         # ── Attente jusqu'au prochain multiple de 15 min ─────────
-        now    = datetime.datetime.now()
-        minute = now.minute
-        second = now.second
-        # Secondes restantes avant le prochain quart d'heure
-        wait_s = (config.CYCLE_INTERVAL_MINUTES - (minute % config.CYCLE_INTERVAL_MINUTES)) * 60 - second
-        if wait_s <= 0:
-            wait_s = config.CYCLE_INTERVAL_MINUTES * 60
+        try:
+            now    = datetime.datetime.now()
+            minute = now.minute
+            second = now.second
+            wait_s = (config.CYCLE_INTERVAL_MINUTES - (minute % config.CYCLE_INTERVAL_MINUTES)) * 60 - second
+            if wait_s <= 0:
+                wait_s = config.CYCLE_INTERVAL_MINUTES * 60
 
-        utils.bot_log.info("Prochain cycle dans %.0f secondes.", wait_s)
-        await asyncio.sleep(wait_s)
+            utils.bot_log.info("Prochain cycle dans %.0f secondes.", wait_s)
+            await asyncio.sleep(wait_s)
+        except Exception:
+            await asyncio.sleep(60)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -540,14 +550,27 @@ def _run_trading_loop(loop: asyncio.AbstractEventLoop) -> None:
     donc on exécute main_loop() dans son propre event loop.
     """
     asyncio.set_event_loop(loop)
+    while True:
+        try:
+            # Lancement de la surveillance haute fréquence en arrière-plan
+            loop.create_task(monitoring_loop())
+            # Lancement de la boucle principale de trading (cycle 15 min)
+            loop.run_until_complete(main_loop())
+        except Exception as exc:
+            utils.bot_log.critical("ERREUR FATALE SYSTEME : Redémarrage du thread trading dans 30s... %s", exc, exc_info=True)
+            utils.alert_error(f"💀 Thread trading crashé : {str(exc)[:200]}\nTentative de redémarrage automatique...")
+            import time
+            time.sleep(30) # Attente avant restart total du thread logic
+
+
+async def telegram_error_handler(update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Gère les erreurs dans le bot Telegram pour éviter qu'il ne s'arrête."""
+    utils.bot_log.error("Erreur Telegram non gérée : %s", context.error)
+    # Envoi d'une alerte si possible, sans trop spammer
     try:
-        # Lancement de la surveillance haute fréquence en arrière-plan
-        loop.create_task(monitoring_loop())
-        # Lancement de la boucle principale de trading (cycle 15 min)
-        loop.run_until_complete(main_loop())
-    except Exception as exc:
-        utils.bot_log.critical("Erreur fatale dans la boucle de trading : %s", exc, exc_info=True)
-        utils.alert_error(f"💀 Thread trading crashé : {str(exc)[:200]}")
+        if "Network is unreachable" not in str(context.error):
+            utils.alert_error(f"⚠️ Erreur Telegram : <code>{str(context.error)[:100]}</code>")
+    except: pass
 
 
 def main() -> None:
@@ -595,6 +618,9 @@ def main() -> None:
     app.add_handler(CommandHandler("breakeven",  cmd_breakeven))
     app.add_handler(CommandHandler("news",       cmd_news))
     app.add_handler(CommandHandler("clearstats", cmd_clearstats))
+
+    # Gestionnaire d'erreurs global pour Telegram
+    app.add_error_handler(telegram_error_handler)
 
     # ── Notification de démarrage (HTTP synchrone) ──────────────
     import MetaTrader5 as mt5
