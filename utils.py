@@ -1046,7 +1046,7 @@ def _fetch_trade_result(ticket: int) -> Optional[dict]:
         exit_deal = [d for d in deals if d.entry == mt5.DEAL_ENTRY_OUT][0]
         
         diff = abs(entry_deal.price - exit_deal.price)
-        # Estimation pips pour BTC : 1 point = 1 USD
+        # Estimation pips pour Gold : 1 point = 0.01 USD (pour XAUUSD)
         pips = diff 
         
         return {"profit": total_profit, "pips": pips}

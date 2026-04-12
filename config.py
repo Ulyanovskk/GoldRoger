@@ -19,7 +19,6 @@ DEEPSEEK_TIMEOUT: int = 30  # secondes
 
 # Corrélation et Sentiment
 DXY_SYMBOL: str = "DXYm" # Indice Dollar (Vérifié sur votre MT5)
-NEWS_FEED_URL: str = "https://cryptopanic.com/api/v1/posts/?kind=news&public=true"
 
 # Prompt système fixe (optimisé tokens)
 DEEPSEEK_SYSTEM_PROMPT: str = (
