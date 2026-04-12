@@ -100,6 +100,12 @@ async def trading_cycle() -> None:
         utils.bot_log.info("Bot en pause — cycle ignoré (trades ouverts conservés).")
         return
 
+    # ── 2b. Limite de positions simultanées ─────────────────────
+    if utils.get_open_trades_count() >= config.MAX_SIMULTANEOUS_TRADES:
+        utils.bot_log.info("Max trades atteint (%d/%d) — cycle ignoré pour économiser les tokens.",
+                           utils.get_open_trades_count(), config.MAX_SIMULTANEOUS_TRADES)
+        return
+
     # ── 3. Collecte des données ─────────────────────────────────
     data = utils.collect_all_data()
     if data is None:
