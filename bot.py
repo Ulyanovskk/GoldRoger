@@ -321,7 +321,7 @@ async def main_loop() -> None:
             # ── Résumé journalier à 23h00 (M7 — horloge broker) ────────
             import MetaTrader5 as mt5
             _tick = mt5.symbol_info_tick(config.MT5_SYMBOL)
-            now = datetime.datetime.utcfromtimestamp(_tick.time) if _tick else datetime.datetime.utcnow()
+            now = datetime.datetime.fromtimestamp(_tick.time, tz=datetime.timezone.utc) if _tick else datetime.datetime.now(datetime.timezone.utc)
             if now.hour == config.DAILY_SUMMARY_HOUR and not state.daily_summary_sent:
                 try:
                     account = mt5.account_info()
@@ -354,9 +354,9 @@ async def main_loop() -> None:
             import MetaTrader5 as mt5
             _tick = mt5.symbol_info_tick(config.MT5_SYMBOL)
             if _tick:
-                now = datetime.datetime.utcfromtimestamp(_tick.time)
+                now = datetime.datetime.fromtimestamp(_tick.time, tz=datetime.timezone.utc)
             else:
-                now = datetime.datetime.utcnow()
+                now = datetime.datetime.now(datetime.timezone.utc)
             minute = now.minute
             second = now.second
             wait_s = (config.CYCLE_INTERVAL_MINUTES - (minute % config.CYCLE_INTERVAL_MINUTES)) * 60 - second
