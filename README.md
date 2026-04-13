@@ -1,39 +1,68 @@
-# 🏴‍☠️ GoldRoger — BTCUSDm AI Trading Bot
+# 🏆 GOLDBOT v2.0 — AI Trading System
 
-GoldRoger est un bot de trading automatique spécialisé sur le Bitcoin (BTCUSDm), propulsé par l'IA **DeepSeek** et intégré à **MetaTrader 5**.
+GOLDBOT est un bot de trading algorithmique pour l'Or (**XAUUSD**) basé sur l'IA DeepSeek et MetaTrader 5. La version 2.0 apporte une architecture orientée résilience, une gestion de risque dynamique et une observabilité complète via Excel.
 
-## 🚀 Fonctionnalités
-- **Analyse Multi-Timeframe** : M15, H1, H4, D1.
-- **IA DeepSeek** : Analyse technique compressée pour une prise de décision intelligente.
-- **Contrôleur Telegram** : Commandes `/start`, `/stop`, `/status`, `/balance`, `/trades`, `/log`.
-- **Gestion du Risque** : Drawdown journalier max, calcul de lot dynamique, alignement des tendances.
-- **Session Trading** : Focus sur les sessions de Londres et New York.
+---
 
-## 🛠 Installation
+## 🏗 Architecture V2
 
-1. **Cloner le projet** :
-   ```bash
-   git clone https://github.com/Ulyanovskk/GoldRoger.git
-   cd GoldRoger
-   ```
+```mermaid
+graph TD
+    A[MT5 Broker] -->|OHLCV Data| B[Python Engine]
+    B -->|Preprocessing| C[Data Compression]
+    C -->|JSON Prompt| D[DeepSeek AI]
+    D -->|Signal JSON| E[Pydantic Validation]
+    E -->|Approved| F[MT5 Order execution]
+    E -->|Rejected| G[Excel Logger]
+    F -->|Monitoring| H[Active Management]
+    H -->|Partial Close/BE/Trailing| A
+    B -->|Alerts| I[Telegram]
+    B -->|Logs| J[Excel/JSON Logs]
+    
+    subgraph Safeguards
+        K[Circuit Breaker]
+        L[Fallback Technical]
+        M[Drawdown Lock]
+    end
+```
 
-2. **Installer les dépendances** :
+---
+
+## 🚀 Installation
+
+1. **Prérequis** : Python 3.11+ et terminal MetaTrader 5 installé.
+2. **Installation des dépendances** :
    ```bash
    pip install -r requirements.txt
    ```
-
-3. **Configurer les secrets** :
+3. **Configuration** :
    - Copiez `.env.example` vers `.env`.
-   - Remplissez vos clés API (DeepSeek, Telegram) et vos accès MT5.
+   - Remplissez vos clés API (DeepSeek, Telegram) et identifiants MT5.
+4. **Lancement** :
+   ```bash
+   python bot.py
+   ```
 
-4. **Lancer le bot** :
-   - Sur Windows : `.\run.ps1` ou `python bot.py`
+---
 
-## 📱 Commandes Telegram
-- `/start` : Lancer le bot.
-- `/stop` : Arrêter et fermer les positions.
-- `/status` : État du bot et performance.
-- `/log` : Voir les derniers logs.
+## 🛡 Sécurité & Résilience (Safeguards)
 
-## ⚠️ Avertissement
-Le trading comporte des risques. Testez toujours ce bot sur un **compte Démo** avant de passer en réel.
+- **Circuit Breaker** : Si l'API DeepSeek échoue 5 fois, le bot bascule en mode technique pur ou se met en pause 15 min.
+- **Fallback Technique** : Algorithme de secours basé sur l'alignement EMA + RSI en cas d'indisponibilité de l'IA.
+- **Observabilité Excel** : Suivi en temps réel des trades, des sessions et des signaux refusés dans `goldbot_performance.xlsx`.
+- **Alertes Proactives** : Pause automatique si le Win Rate chute sous 40% ou si le Drawdown atteint 3%.
+
+---
+
+## 📊 Commandes Telegram
+
+- `/start` : Démarrer le bot.
+- `/stop` : Arrêt d'urgence.
+- `/status` : État actuel, P&L du jour et latence IA.
+- `/analyze` : Force une analyse immédiate.
+- `/setrisk X` : Change le risque maximum (ex: `/setrisk 1.5`).
+
+---
+
+## 📝 Licence
+Usage privé uniquement. GOLDBOT n'est pas un conseil en investissement. Le trading de CFD comporte des risques élevés.

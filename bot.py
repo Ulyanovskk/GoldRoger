@@ -15,6 +15,8 @@ import signal
 import sys
 import threading
 import traceback
+from collections import deque
+from typing import Optional
 
 from telegram import Update
 from telegram.ext import (
@@ -25,6 +27,7 @@ from telegram.ext import (
 
 import config
 import utils
+import excel_logger
 
 # ══════════════════════════════════════════════════════════════
 # ÉTAT GLOBAL DU BOT
@@ -48,6 +51,18 @@ class BotState:
         # Réglages dynamiques (overrides de config.py)
         self.max_risk_pct: float = config.MAX_RISK_PCT
         self.min_confidence: int = config.MIN_CONFIDENCE
+        # M3 — Circuit Breaker
+        self.ia_fail_count: int = 0
+        self.circuit_open_until: Optional[datetime.datetime] = None
+        # M5 — Mémoire contextuelle
+        self.last_trades: deque = deque(maxlen=10)  # M11: 10 derniers pour win rate
+        self.week_bias: str = "NEUTRAL"
+        self.persistent_sr: list[float] = []
+        # M10 — Session tracking
+        self.session_update_counter: int = 0
+        self.open_trade_times: dict[int, datetime.datetime] = {}
+        # M11 — Observabilité
+        self.last_ia_latency_s: float = 0.0
         self._lock = asyncio.Lock()
 
     async def set_status(self, new_status: str) -> None:
@@ -134,12 +149,31 @@ async def trading_cycle() -> None:
     utils.bot_log.info("Filtre pré-IA → OK")
 
     # ── 5. Compression + appel DeepSeek ─────────────────────────
-    compressed = utils.compress_data(data)
+    # M5 — Préparation Contexte
+    state.persistent_sr = data["SR"]["H4"]["r"][:2] + data["SR"]["H4"]["s"][:1] # Max 3
+    state.week_bias = data["D1"]["ind"]["ema_trend"].upper()
+    
+    ctx = {
+        "last_trades": list(state.last_trades),
+        "week_bias": state.week_bias,
+        "persistent_sr": state.persistent_sr
+    }
+    
+    compressed = utils.compress_data(data, context=ctx)
     utils.bot_log.info("Données compressées : %s", compressed)
 
-    signal_raw = utils.call_deepseek(compressed)
+    signal_raw = await utils.call_deepseek(compressed, state_obj=state)
+    
+    # M4 — Fallback Technique
+    is_fallback = False
+    if signal_raw is None and (state.circuit_open_until or state.ia_fail_count >= 3):
+        utils.bot_log.warning("IA injoignable. Tentative de fallback technique...")
+        utils.send_telegram(f"⚠️ IA injoignable ({state.ia_fail_count} échecs). Passage en mode fallback technique.")
+        signal_raw = await utils.generate_fallback_signal(data)
+        is_fallback = True
+
     if signal_raw is None:
-        utils.bot_log.warning("Aucun signal DeepSeek reçu. Cycle ignoré.")
+        utils.bot_log.warning("Aucun signal disponible (IA et Fallback échoués).")
         return
 
     utils.bot_log.info(
@@ -155,6 +189,11 @@ async def trading_cycle() -> None:
 
     if not valid:
         utils.bot_log.info("Signal rejeté par garde-fous : %s", reject_reason)
+        # M10 — Log signal refusé (non-bloquant)
+        _src = signal_raw.get("source", "deepseek") if signal_raw else "deepseek"
+        asyncio.ensure_future(
+            asyncio.to_thread(excel_logger.write_refused_signal, signal_raw or {}, reject_reason, _src)
+        )
         return
 
     utils.bot_log.info("Signal validé — exécution de l'ordre…")
@@ -163,10 +202,30 @@ async def trading_cycle() -> None:
     if trade:
         utils.alert_trade_open(trade)
         state.trades_today += 1
+        # M10 — Enregistrement heure d'ouverture pour calcul durée
+        state.open_trade_times[trade["ticket"]] = datetime.datetime.now()
         utils.bot_log.info(
             "Ordre exécuté — ticket #%d | %s %.2f lots @ %.2f",
             trade["ticket"], trade["dir"], trade["lot"], trade["price"],
         )
+
+        # M8 — Confirmation de l'ordre après 2s
+        await asyncio.sleep(2)
+        import MetaTrader5 as mt5
+        confirmed_pos = mt5.positions_get(ticket=trade["ticket"])
+        if not confirmed_pos:
+            confirmed_ord = mt5.orders_get(symbol=config.MT5_SYMBOL)
+            order_tickets = [o.ticket for o in confirmed_ord] if confirmed_ord else []
+            if trade["ticket"] not in order_tickets:
+                utils.bot_log.error(
+                    "Ordre #%d non confirmé après 2s — vérification manuelle requise.",
+                    trade["ticket"]
+                )
+                utils.send_telegram(
+                    f"⚠️ <b>Ordre non confirmé</b> après 2s\n"
+                    f"Ticket : #{trade['ticket']} | {trade['dir']} {trade['lot']}L\n"
+                    f"Vérification manuelle requise."
+                )
     else:
         utils.bot_log.error("Échec de l'exécution de l'ordre.")
         utils.alert_error("Échec d'exécution d'un ordre MT5 validé.")
@@ -200,8 +259,44 @@ async def monitoring_loop() -> None:
                 for p in positions:
                     utils.process_active_trade_management(p)
 
+                # M11 — Alertes proactives
+                await utils.check_proactive_alerts(state)
+
                 # 2. Vérifier si des positions ont été fermées (TP/SL/Manuel)
-                state.known_tickets = utils.check_and_alert_closed_trades(state.known_tickets)
+                state.known_tickets, closed_list = utils.check_and_alert_closed_trades(state.known_tickets)
+                for res in closed_list:
+                    state.last_trades.append({
+                        "dir": res["dir"], 
+                        "pnl": res["profit"], 
+                        "pct": res["pnl_pct"]
+                    })
+                    # M10 — Écriture trade clôturé dans Excel (non-bloquant)
+                    ticket = res["ticket"]
+                    open_time = state.open_trade_times.pop(ticket, None)
+                    duration = int((datetime.datetime.now() - open_time).total_seconds() / 60) if open_time else 0
+                    _trade_log = {"dir": res["dir"], "lot": 0, "sl": 0, "tp": 0, "conf": 0}
+                    _src = "deepseek"
+                    asyncio.ensure_future(
+                        asyncio.to_thread(
+                            excel_logger.write_trade,
+                            _trade_log, res.get("entry", 0), res.get("exit", 0),
+                            res["profit"], _src, duration
+                        )
+                    )
+
+                # M10 — Mise à jour session toutes les 30 min (3 cycles de 10s × 180)
+                state.session_update_counter += 1
+                if state.session_update_counter >= 180:  # 180 × 10s = 30 min
+                    state.session_update_counter = 0
+                    import MetaTrader5 as mt5
+                    account = mt5.account_info()
+                    if account:
+                        _dd = utils.get_daily_drawdown_pct()
+                        asyncio.ensure_future(
+                            asyncio.to_thread(
+                                excel_logger.update_session_row, account.equity, _dd
+                            )
+                        )
         except Exception as exc:
             utils.bot_log.error("Erreur critique dans monitoring_loop : %s", exc)
             await asyncio.sleep(30) # Plus long délai en cas de crash répété
@@ -223,11 +318,12 @@ async def main_loop() -> None:
 
     while True:
         try:
-            # ── Résumé journalier à 23h00 ───────────────────────────
-            now = datetime.datetime.now()
+            # ── Résumé journalier à 23h00 (M7 — horloge broker) ────────
+            import MetaTrader5 as mt5
+            _tick = mt5.symbol_info_tick(config.MT5_SYMBOL)
+            now = datetime.datetime.utcfromtimestamp(_tick.time) if _tick else datetime.datetime.utcnow()
             if now.hour == config.DAILY_SUMMARY_HOUR and not state.daily_summary_sent:
                 try:
-                    import MetaTrader5 as mt5
                     account = mt5.account_info()
                     if account:
                         utils.alert_daily_summary(
@@ -253,16 +349,21 @@ async def main_loop() -> None:
             utils.alert_error(f"⚠️ Watchdog main_loop relancé après erreur :\n<code>{str(exc)[:200]}</code>")
             await asyncio.sleep(10) # Petit délai avant de reprendre
 
-        # ── Attente jusqu'au prochain multiple de 15 min ─────────
+        # ── Attente jusqu'au prochain multiple de 15 min (M7) ───
         try:
-            now    = datetime.datetime.now()
+            import MetaTrader5 as mt5
+            _tick = mt5.symbol_info_tick(config.MT5_SYMBOL)
+            if _tick:
+                now = datetime.datetime.utcfromtimestamp(_tick.time)
+            else:
+                now = datetime.datetime.utcnow()
             minute = now.minute
             second = now.second
             wait_s = (config.CYCLE_INTERVAL_MINUTES - (minute % config.CYCLE_INTERVAL_MINUTES)) * 60 - second
             if wait_s <= 0:
                 wait_s = config.CYCLE_INTERVAL_MINUTES * 60
 
-            utils.bot_log.info("Prochain cycle dans %.0f secondes.", wait_s)
+            utils.bot_log.info("Prochain cycle dans %.0f secondes (broker UTC %s).", wait_s, now.strftime("%H:%M:%S"))
             await asyncio.sleep(wait_s)
         except Exception:
             await asyncio.sleep(60)
@@ -675,18 +776,13 @@ if __name__ == "__main__":
     signal.signal(signal.SIGINT,  _handle_signal)
     signal.signal(signal.SIGTERM, _handle_signal)
 
-    # Vérification que les variables critiques sont présentes
-    missing = []
+    # M1 — Assertions au démarrage (Secrets)
     for var in ("DEEPSEEK_API_KEY", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
                 "MT5_LOGIN", "MT5_PASSWORD", "MT5_SERVER"):
-        val = getattr(config, var, None)
-        if not val or str(val) in ("", "0"):
-            missing.append(var)
-
-    if missing:
-        print(f"[ERREUR] Variables manquantes dans .env : {', '.join(missing)}")
-        print("Copiez .env.example vers .env et remplissez toutes les valeurs.")
-        sys.exit(1)
+        val = getattr(config, var)
+        assert val is not None, f"Variable d'environnement {var} manquante."
+        if var == "MT5_LOGIN":
+            assert val != 0, f"MT5_LOGIN ne peut pas être 0."
 
     # Lancement (PTB v21 — main() est synchrone, run_polling gère son propre loop)
     try:

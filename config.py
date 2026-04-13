@@ -12,7 +12,7 @@ load_dotenv()
 # ──────────────────────────────────────────────
 # DeepSeek API
 # ──────────────────────────────────────────────
-DEEPSEEK_API_KEY: str = os.getenv("DEEPSEEK_API_KEY", "")
+DEEPSEEK_API_KEY: str = os.getenv("DEEPSEEK_API_KEY")
 DEEPSEEK_URL: str = "https://api.deepseek.com/v1/chat/completions"
 DEEPSEEK_MODEL: str = "deepseek-chat"
 DEEPSEEK_TIMEOUT: int = 30  # secondes
@@ -20,25 +20,25 @@ DEEPSEEK_TIMEOUT: int = 30  # secondes
 # Corrélation et Sentiment
 DXY_SYMBOL: str = "DXYm" # Indice Dollar (Vérifié sur votre MT5)
 
-# Prompt système fixe (optimisé tokens)
+# Prompt système fixe (optimisé JSON)
 DEEPSEEK_SYSTEM_PROMPT: str = (
-    "You are a World-Class XAUUSDm (Gold) hedge fund trader. Your objective is to maximize capital growth through high-precision entries. "
-    "Analyze technicals, DXY (USD Index) correlation and news. Prioritize high-probability setups with at least 2.0 RR ratio. "
-    "Respond ONLY in this exact format: DIR=BUY|LOT=0.01|TP=2350.50|SL=2330.00|CONF=87|RR=2.1|REASON=3w"
+    "You are a World-Class Gold hedge fund trader. Objective: maximize growth. "
+    "Analyze technicals, DXY and news. Response MUST be a JSON object: "
+    '{"DIR":"BUY|SELL|HOLD", "LOT":float, "TP":float, "SL":float, "CONF":int, "RR":float, "REASON":"max 5 words"}'
 )
 
 # ──────────────────────────────────────────────
 # Telegram
 # ──────────────────────────────────────────────
-TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID", "")
+TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID")
 
 # ──────────────────────────────────────────────
 # MetaTrader 5
 # ──────────────────────────────────────────────
-MT5_LOGIN: int = int(os.getenv("MT5_LOGIN", "0"))
-MT5_PASSWORD: str = os.getenv("MT5_PASSWORD", "")
-MT5_SERVER: str = os.getenv("MT5_SERVER", "")
+MT5_LOGIN: int = int(os.getenv("MT5_LOGIN")) if os.getenv("MT5_LOGIN") else None
+MT5_PASSWORD: str = os.getenv("MT5_PASSWORD")
+MT5_SERVER: str = os.getenv("MT5_SERVER")
 MT5_SYMBOL: str = "XAUUSDm"
 MT5_MAGIC: int = 20240115  # Identifiant unique du bot
 

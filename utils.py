@@ -16,11 +16,14 @@ import re
 import json
 import logging
 import requests
+import httpx
+import asyncio
 import datetime
 import numpy as np
 import pandas as pd
 from logging.handlers import TimedRotatingFileHandler
-from typing import Optional
+from typing import Optional, Literal
+from pydantic import BaseModel, Field, field_validator
 
 import ta
 import MetaTrader5 as mt5
@@ -131,6 +134,9 @@ _TF_MAP = {
     "H4":  mt5.TIMEFRAME_H4,
     "D1":  mt5.TIMEFRAME_D1,
 }
+
+# M6 — Cache des indicateurs {tf: {data, last_bar_time}}
+_indicator_cache: dict = {}
 
 
 def get_ohlcv(timeframe_name: str, n: int = config.CANDLES_COUNT) -> Optional[pd.DataFrame]:
@@ -296,6 +302,22 @@ def find_support_resistance(df: pd.DataFrame, n_levels: int = 2) -> tuple[list, 
         return [], []
 
 
+def get_cached_indicators(tf: str, df: pd.DataFrame) -> dict:
+    """
+    Retourne les indicateurs depuis le cache si la bougie n'a pas changé (M6).
+    Invalide le cache uniquement à la clôture d'une nouvelle bougie.
+    """
+    last_bar_time = df["time"].iloc[-1]
+    cached = _indicator_cache.get(tf)
+    if cached and cached["last_bar_time"] == last_bar_time:
+        bot_log.debug("Cache hit indicateurs [%s] — bougie %s", tf, last_bar_time)
+        return cached["data"]
+    result = compute_indicators(df)
+    _indicator_cache[tf] = {"data": result, "last_bar_time": last_bar_time}
+    bot_log.debug("Cache miss indicateurs [%s] — recalcul", tf)
+    return result
+
+
 def collect_all_data() -> Optional[dict]:
     """
     Collecte et calcule les indicateurs sur les 4 timeframes.
@@ -308,7 +330,7 @@ def collect_all_data() -> Optional[dict]:
             if df is None or df.empty:
                 bot_log.error("Données manquantes pour %s", tf)
                 return None
-            indicators = compute_indicators(df)
+            indicators = get_cached_indicators(tf, df)  # M6
             result[tf] = {"df": df, "ind": indicators}
 
         # Support/Résistance sur H4 et D1
@@ -317,7 +339,6 @@ def collect_all_data() -> Optional[dict]:
         result["SR"] = {"H4": {"s": s_h4, "r": r_h4},
                         "D1": {"s": s_d1, "r": r_d1}}
 
-        # Prix actuel et info compte
         tick = mt5.symbol_info_tick(config.MT5_SYMBOL)
         result["current_price"] = tick.ask if tick else result["M15"]["ind"]["close"]
 
@@ -401,13 +422,21 @@ def fetch_market_news() -> str:
         return "news:?"
 
 
-def compress_data(data: dict) -> str:
+def compress_data(data: dict, context: dict = None) -> str:
     """
-    Compresse toutes les données multi-timeframe en une chaîne < 120 tokens.
-    Format : XAU|M15:...|H1:...|H4:...|D1:...|bal=...|sess=...
+    Compresse les données techniques + injection du contexte (M5).
     """
     try:
-        parts = ["XAU"]
+        parts = []
+        
+        # M5 — Head context
+        if context:
+            l3 = "".join(["W" if t['pnl'] > 0 else "L" for t in context.get('last_trades', [])])
+            wb = context.get('week_bias', 'NEUT')[:4]
+            sr = context.get('persistent_sr', [])
+            parts.append(f"CTX:L3={l3 or 'None'},WB={wb},SR={sr}")
+
+        parts.append("XAU")
 
         def tf_str(tf: str) -> str:
             ind = data[tf]["ind"]
@@ -560,92 +589,178 @@ def pre_ia_filter(data: dict) -> tuple[bool, str]:
 
 
 # ══════════════════════════════════════════════════════════════
-# 6. APPEL DEEPSEEK
+# 5b. ALERTES PROACTIVES (M11)
 # ══════════════════════════════════════════════════════════════
 
-def call_deepseek(compressed_data: str) -> Optional[dict]:
+async def check_proactive_alerts(state_obj) -> None:
     """
-    Envoie les données compressées à DeepSeek et parse la réponse.
-    Retourne un dict {DIR, LOT, TP, SL, CONF, RR, REASON} ou None.
+    Vérifie et déclenche les alertes Telegram proactives (M11).
+    Appelé depuis monitoring_loop toutes les 10s.
     """
+    # 1. Win rate < 40% sur les 10 derniers trades
+    trades = list(state_obj.last_trades)
+    if len(trades) >= 5:
+        wins = sum(1 for t in trades if t.get("pnl", 0) > 0)
+        win_rate = wins / len(trades) * 100
+        if win_rate < 40 and state_obj.is_active():
+            await state_obj.set_status("pausé")
+            send_telegram(
+                f"⚠️ <b>Win rate faible : {win_rate:.0f}%</b>\n"
+                f"Bot mis en pause préventive sur les {len(trades)} derniers trades."
+            )
+            bot_log.warning("Pause préventive : win rate %.0f%%", win_rate)
+
+    # 2. Latence IA > 3s
+    if state_obj.last_ia_latency_s > 3.0:
+        send_telegram(f"⏱ <b>IA lente : {state_obj.last_ia_latency_s}s</b>")
+        bot_log.warning("Latence IA élevée : %.2fs", state_obj.last_ia_latency_s)
+        state_obj.last_ia_latency_s = 0.0  # Reset pour éviter spam
+
+    # 3. Drawdown session > 2% → risque réduit
+    dd = get_daily_drawdown_pct()
+    if dd >= 3.0 and state_obj.is_active():
+        await state_obj.set_status("stoppé")
+        close_all_positions()
+        send_telegram("🛑 <b>Drawdown 3% atteint.</b> Arrêt du bot.")
+        bot_log.error("Arrêt automatique : drawdown %.2f%%", dd)
+    elif dd >= 2.0:
+        if state_obj.max_risk_pct > config.MAX_RISK_PCT * 0.5:
+            state_obj.max_risk_pct = round(config.MAX_RISK_PCT * 0.5, 2)
+            send_telegram(
+                f"📉 <b>Drawdown {dd:.2f}% atteint.</b>\n"
+                f"Risque réduit à {state_obj.max_risk_pct}% (50%)."
+            )
+
+    # 4. Spread anormal (déjà dans pre_ia_filter — log seul ici si hors session)
     try:
-        headers = {
-            "Authorization": f"Bearer {config.DEEPSEEK_API_KEY}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": config.DEEPSEEK_MODEL,
-            "messages": [
-                {"role": "system", "content": config.DEEPSEEK_SYSTEM_PROMPT},
-                {"role": "user",   "content": compressed_data},
-            ],
-            "temperature": 0.1,
-            "max_tokens": 80,
-        }
-
-        resp = requests.post(
-            config.DEEPSEEK_URL,
-            headers=headers,
-            json=payload,
-            timeout=config.DEEPSEEK_TIMEOUT,
-        )
-        resp.raise_for_status()
-
-        raw = resp.json()["choices"][0]["message"]["content"].strip()
-        bot_log.info("Réponse DeepSeek brute : %s", raw)
-
-        return _parse_deepseek_response(raw)
-    except requests.exceptions.Timeout:
-        bot_log.error("Timeout DeepSeek API après %ds", config.DEEPSEEK_TIMEOUT)
-        return None
-    except requests.exceptions.RequestException as exc:
-        bot_log.error("Erreur HTTP DeepSeek : %s", exc)
-        return None
-    except Exception as exc:
-        bot_log.error("Exception call_deepseek : %s", exc)
-        return None
+        tick = mt5.symbol_info_tick(config.MT5_SYMBOL)
+        if tick and tick.spread > config.MAX_SPREAD_POINTS * 2:
+            send_telegram(f"📊 <b>Spread anormal détecté : {tick.spread} pts.</b> Trade ignoré.")
+    except Exception:
+        pass
 
 
-def _parse_deepseek_response(raw: str) -> Optional[dict]:
+
+# ══════════════════════════════════════════════════════════════
+
+class AISignal(BaseModel):
+    DIR: Literal["BUY", "SELL", "HOLD"]
+    LOT: float = Field(ge=0.01, le=10.0)
+    TP: float
+    SL: float
+    CONF: int = Field(ge=0, le=100)
+    RR: float
+    REASON: str = Field(max_length=100) # max 5 words est une consigne prompt
+
+async def call_deepseek(compressed_data: str, state_obj=None) -> Optional[dict]:
     """
-    Parse la réponse au format :
-    DIR=BUY|LOT=0.02|TP=2334|SL=2318|CONF=87|RR=1.8|REASON=3w
-    Retourne un dict ou None si le parsing échoue.
+    Envoie les données à DeepSeek avec retry exponentiel et circuit breaker (M3).
     """
-    try:
-        pattern = (
-            r"DIR=(?P<DIR>BUY|SELL|WAIT)"
-            r"\|LOT=(?P<LOT>[\d.]+)"
-            r"\|TP=(?P<TP>[\d.]+)"
-            r"\|SL=(?P<SL>[\d.]+)"
-            r"\|CONF=(?P<CONF>\d+)"
-            r"\|RR=(?P<RR>[\d.]+)"
-            r"\|REASON=(?P<REASON>[^\s|]+)"
-        )
-        m = re.search(pattern, raw)
-        if not m:
-            bot_log.error("Impossible de parser la réponse DeepSeek : '%s'", raw)
+    if state_obj and state_obj.circuit_open_until:
+        if datetime.datetime.now() < state_obj.circuit_open_until:
+            bot_log.warning("Circuit ouvert : Appel DeepSeek ignoré.")
             return None
+        else:
+            state_obj.circuit_open_until = None
+            state_obj.ia_fail_count = 0
 
-        return {
-            "DIR":    m.group("DIR"),
-            "LOT":    float(m.group("LOT")),
-            "TP":     float(m.group("TP")),
-            "SL":     float(m.group("SL")),
-            "CONF":   int(m.group("CONF")),
-            "RR":     float(m.group("RR")),
-            "REASON": m.group("REASON"),
+    retries = [2, 4, 8]
+    for attempt, wait_time in enumerate(retries + [0, 0], 1):
+        try:
+            async with httpx.AsyncClient(timeout=config.DEEPSEEK_TIMEOUT) as client:
+                _t0 = asyncio.get_event_loop().time()
+                resp = await client.post(
+                    config.DEEPSEEK_URL,
+                    headers={
+                        "Authorization": f"Bearer {config.DEEPSEEK_API_KEY}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": config.DEEPSEEK_MODEL,
+                        "messages": [
+                            {"role": "system", "content": config.DEEPSEEK_SYSTEM_PROMPT},
+                            {"role": "user",   "content": compressed_data},
+                        ],
+                        "temperature": 0.1,
+                        "max_tokens": 150,
+                        "response_format": {"type": "json_object"}
+                    }
+                )
+                latency = round(asyncio.get_event_loop().time() - _t0, 2)
+                if state_obj:
+                    state_obj.last_ia_latency_s = latency
+                resp.raise_for_status()
+                raw_content = resp.json()["choices"][0]["message"]["content"]
+                
+                signal_obj = AISignal.model_validate_json(raw_content)
+                if state_obj: state_obj.ia_fail_count = 0 
+                return signal_obj.model_dump()
+
+        except Exception as exc:
+            bot_log.error("Tentative %d/5 échouée : %s", attempt, exc)
+            if attempt <= 3:
+                await asyncio.sleep(wait_time)
+            else:
+                if state_obj:
+                    state_obj.ia_fail_count += 1
+                    if state_obj.ia_fail_count >= 5:
+                        state_obj.circuit_open_until = datetime.datetime.now() + datetime.timedelta(minutes=15)
+                        alert_error(f"Circuit ouvert (IA). Pause 15min. Total échecs: {state_obj.ia_fail_count}")
+                return None
+    return None
+
+
+async def generate_fallback_signal(data: dict) -> Optional[dict]:
+    """
+    Génère un signal technique de secours (M4).
+    """
+    try:
+        # 1. Alignement EMA (M15+H1+H4)
+        trends = [data[tf]["ind"]["ema_trend"] for tf in ["M15", "H1", "H4"]]
+        if not (trends[0] == trends[1] == trends[2] and trends[0] in ("bull", "bear")):
+            return None 
+
+        direction = "BUY" if trends[0] == "bull" else "SELL"
+        
+        # 2. RSI Filter
+        rsi_m15 = data["M15"]["ind"]["rsi"]
+        if direction == "BUY" and rsi_m15 < 55: return None
+        if direction == "SELL" and rsi_m15 > 45: return None
+
+        # 3. Construction du signal
+        current_price = data["current_price"]
+        atr = data["M15"]["ind"]["atr"]
+        
+        # SL/TP basiques pour le fallback (1.5 ATR / 3.0 ATR pour RR=2.0)
+        sl_dist = atr * 1.5
+        tp_dist = sl_dist * 2.0
+        
+        sl = current_price - sl_dist if direction == "BUY" else current_price + sl_dist
+        tp = current_price + tp_dist if direction == "BUY" else current_price - tp_dist
+
+        # Calcul LOT (réduit de 50%)
+        # On utilise une valeur temporaire pour LOT car validate_signal le recalibrera
+        # mais on précisera à validate_signal de réduire le risque.
+        
+        fallback_signal = {
+            "DIR":    direction,
+            "LOT":    0.01, # Sera recalculé dans validate_signal
+            "TP":     round(tp, 2),
+            "SL":     round(sl, 2),
+            "CONF":   60,
+            "RR":     2.0,
+            "REASON": "FALLBACK_TECH",
+            "source": "fallback_technique"
         }
+        
+        bot_log.info("Signal Fallback généré : %s", fallback_signal)
+        return fallback_signal
+
     except Exception as exc:
-        bot_log.error("Exception _parse_deepseek_response : %s", exc)
+        bot_log.error("Erreur generate_fallback_signal : %s", exc)
         return None
 
-
-# ══════════════════════════════════════════════════════════════
-# 7. GARDE-FOUS RISQUE
-# ══════════════════════════════════════════════════════════════
-
-def calculate_lot_size(balance: float, sl_pips: float, confidence: int = 85) -> float:
+def calculate_lot_size(balance: float, sl_pips: float, confidence: int = 85, risk_override: float = None) -> float:
     """
     Calcule la taille de lot avec risque dynamique basé sur la confiance.
     """
@@ -661,8 +776,8 @@ def calculate_lot_size(balance: float, sl_pips: float, confidence: int = 85) -> 
             
             risk_pct = config.MIN_RISK_PCT + (progress * (config.MAX_RISK_PCT - config.MIN_RISK_PCT))
         else:
-            # Utilise le risque constant défini par l'utilisateur (via /setrisk ou config)
-            risk_pct = config.MAX_RISK_PCT
+            # Utilise le risque constant ou override
+            risk_pct = risk_override if risk_override is not None else config.MAX_RISK_PCT
 
         risk_usd = balance * risk_pct / 100
         
@@ -695,8 +810,8 @@ def validate_signal(signal: dict, balance: float, current_price: float,
     Supporte les overrides dynamiques min_conf et max_risk.
     """
     try:
-        if signal["DIR"] == "WAIT":
-            return False, signal, "Direction WAIT : aucun trade"
+        if signal["DIR"] == "HOLD":
+            return False, signal, "Direction HOLD : aucun trade"
 
         # Confiance minimale (dynamique ou config)
         effective_min_conf = min_conf if min_conf is not None else config.MIN_CONFIDENCE
@@ -723,14 +838,15 @@ def validate_signal(signal: dict, balance: float, current_price: float,
         sl_pips = abs(current_price - signal["SL"])
         
         # Override dynamique du risque max si présent
-        old_max_risk = config.MAX_RISK_PCT
-        if max_risk is not None:
-            config.MAX_RISK_PCT = max_risk
-            
-        max_lot = calculate_lot_size(balance, sl_pips, confidence=signal["CONF"])
+        effective_risk = max_risk if max_risk is not None else config.MAX_RISK_PCT
         
-        # On remet la config d'origine (optionnel car BotState gère l'override à chaque appel)
-        config.MAX_RISK_PCT = old_max_risk
+        # M4 — Sécurité fallback : réduction de 50% du risque
+        if signal.get("source") == "fallback_technique":
+            effective_risk *= 0.5
+            
+        max_lot = calculate_lot_size(balance, sl_pips, confidence=signal["CONF"], risk_override=effective_risk)
+
+
 
         if signal["LOT"] > max_lot:
             bot_log.warning(
@@ -964,8 +1080,17 @@ def partial_close_position(ticket: int, pct: float = 0.5) -> bool:
         return False
 
 
+def compute_adx(df: pd.DataFrame, period: int = 14) -> float:
+    """Retourne la valeur ADX sur la dernière bougie (M12)."""
+    try:
+        adx_ind = ta.trend.ADXIndicator(df["high"], df["low"], df["close"], window=period)
+        return round(adx_ind.adx().iloc[-1], 2)
+    except Exception:
+        return 20.0  # Valeur neutre par défaut
+
+
 def process_active_trade_management(pos) -> None:
-    """Applique le Breakeven, Partial Close et Trailing Stop sur une position."""
+    """Applique Breakeven, Partial Close (M12 dynamique) et Trailing Stop (M12 ADX)."""
     try:
         ticket = pos.ticket
         price_open = pos.price_open
@@ -981,29 +1106,48 @@ def process_active_trade_management(pos) -> None:
         dist_actuelle = (current_price - price_open) if is_buy else (price_open - current_price)
         progression = dist_actuelle / dist_total
 
-        # 2. Clôture Partielle + Break-even (TP1)
+        # 2. Clôture Partielle + Break-even (M12 — TP1 dynamique)
         if config.USE_PARTIAL_CLOSE and "|PC" not in pos.comment:
-            if progression >= config.PARTIAL_CLOSE_PCT:
-                if partial_close_position(ticket):
-                    send_telegram(f"✅ <b>TP1 ATTEINT — #{ticket}</b>\nClôture partielle effectuée.")
-                    if config.USE_BREAK_EVEN:
-                        # On met le SL un poil au dessus/dessous du prix d'entrée pour couvrir les fees
-                        new_sl = price_open + (0.5 if is_buy else -0.5) 
-                        if modify_position_sl(ticket, new_sl):
-                            send_telegram(f"🛡 <b>BREAK-EVEN — #{ticket}</b>\nStop Loss déplacé au prix d'entrée.")
+            # Lecture CONF/RR depuis le commentaire (format GOLDBOT|REASON|CONF=XX)
+            _conf, _rr = 85, 2.0
+            try:
+                for part in pos.comment.split("|"):
+                    if part.startswith("CONF="):
+                        _conf = int(part.split("=")[1])
+            except Exception:
+                pass
 
-        # 3. Trailing Stop (uniquement après le Break-even si activé)
-        if config.USE_TRAILING_STOP and progression > 0.2: # Commence après 20% de profit seulement
-            # On récupère l'ATR M15 pour la distance
-            rates = mt5.copy_rates_from_pos(pos.symbol, mt5.TIMEFRAME_M15, 0, 15)
+            # TP1 dynamique selon confiance et RR
+            if _conf >= 90:
+                close_pct = 0.30  # laisser courir
+            elif _conf >= 85:
+                close_pct = 0.50  # comportement standard
+            else:
+                close_pct = 0.65  # sortie prudente
+
+            if progression >= close_pct:
+                if partial_close_position(ticket, pct=0.5):
+                    send_telegram(f"✅ <b>TP1 ATTEINT — #{ticket}</b>\nClôture {int(close_pct*100)}% (CONF={_conf}).")
+                    if config.USE_BREAK_EVEN:
+                        new_sl = price_open + (0.5 if is_buy else -0.5)
+                        if modify_position_sl(ticket, new_sl):
+                            send_telegram(f"🛡 <b>BREAK-EVEN — #{ticket}</b>\nSL déplacé au prix d'entrée.")
+
+        # 3. Trailing Stop ADX-adapté (M12)
+        if config.USE_TRAILING_STOP and progression > 0.2:
+            rates = mt5.copy_rates_from_pos(pos.symbol, mt5.TIMEFRAME_M15, 0, 30)
             if rates is not None and len(rates) > 0:
                 df = pd.DataFrame(rates)
-                atr = ta.volatility.AverageTrueRange(df['high'], df['low'], df['close']).average_true_range().iloc[-1]
-                dist_trail = atr * config.TRAILING_STOP_DISTANCE_ATR
-                
+                df.rename(columns={"open": "Open", "high": "High", "low": "Low", "close": "Close"}, inplace=True)
+                atr = ta.volatility.AverageTrueRange(df["High"], df["Low"], df["Close"]).average_true_range().iloc[-1]
+                adx = compute_adx(df)
+                # M12 : trend fort (ADX>30) → multiplieur réduit (serrer le stop)
+                atr_multiplier = 1.5 if adx > 30 else 2.5
+                dist_trail = atr * atr_multiplier
+
                 if is_buy:
                     target_sl = current_price - dist_trail
-                    if target_sl > sl_current + (atr * 0.5): # On ne bouge que si le gain est significatif (> 0.5 ATR)
+                    if target_sl > sl_current + (atr * 0.5):
                         modify_position_sl(ticket, target_sl)
                 else:
                     target_sl = current_price + dist_trail
@@ -1046,20 +1190,26 @@ def _fetch_trade_result(ticket: int) -> Optional[dict]:
         exit_deal = [d for d in deals if d.entry == mt5.DEAL_ENTRY_OUT][0]
         
         diff = abs(entry_deal.price - exit_deal.price)
-        # Estimation pips pour Gold : 1 point = 0.01 USD (pour XAUUSD)
         pips = diff 
         
-        return {"profit": total_profit, "pips": pips}
+        # M5 context data
+        return {
+            "ticket": ticket,
+            "profit": total_profit, 
+            "pips": pips,
+            "dir": "BUY" if entry_deal.type == mt5.ORDER_TYPE_BUY else "SELL",
+            "pnl_pct": (total_profit / entry_deal.volume / entry_deal.price) * 100 # Approx
+        }
     except Exception as exc:
         bot_log.error("Exception _fetch_trade_result pour ticket #%d : %s", ticket, exc)
         return None
 
 
-def check_and_alert_closed_trades(known_tickets: list[int]) -> list[int]:
+def check_and_alert_closed_trades(known_tickets: list[int]) -> tuple[list[int], list[dict]]:
     """
-    Vérifie si des tickets suivis ont été clôturés (TP, SL ou manuel).
-    Envoie une alerte Telegram et retourne la liste des tickets restants.
+    Vérifie les clôtures et retourne (tickets_actifs, resultats_clotures).
     """
+    closed_results = []
     try:
         current_positions = get_open_positions()
         current_tickets = [p.ticket for p in current_positions]
@@ -1067,25 +1217,22 @@ def check_and_alert_closed_trades(known_tickets: list[int]) -> list[int]:
         still_open = []
         for ticket in known_tickets:
             if ticket not in current_tickets:
-                # Le trade a été fermé !
                 res = _fetch_trade_result(ticket)
                 if res:
                     alert_trade_close(ticket, res['profit'], res['pips'])
+                    closed_results.append(res)
                 else:
-                    # Alerte simplifiée si l'historique n'est pas encore à jour
                     send_telegram(f"ℹ️ <b>POSITION FERMÉE</b>\nTicket : #{ticket}")
             else:
                 still_open.append(ticket)
         
-        # On ajoute les nouveaux tickets qui n'étaient pas encore suivis
         for t in current_tickets:
-            if t not in still_open:
-                still_open.append(t)
+            if t not in still_open: still_open.append(t)
                 
-        return still_open
+        return still_open, closed_results
     except Exception as exc:
         bot_log.error("Exception check_and_alert_closed_trades : %s", exc)
-        return known_tickets
+        return known_tickets, []
 
 
 def close_position_by_ticket(ticket: int) -> bool:
