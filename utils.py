@@ -577,7 +577,7 @@ def get_daily_drawdown_pct(start_balance: float = 0.0) -> float:
         if start_balance > 0:
             # AUDIT-FIX #3 — Base de calcul fixée au début de journée
             dd = (start_balance - account.balance) / start_balance * 100
-            bot_log.info(
+            bot_log.debug(
                 "DD Check | start=%.2f | current=%.2f | dd=%.2f%% | max=%.1f%%",
                 start_balance, account.balance, dd, config.MAX_DAILY_DRAWDOWN
             )
@@ -592,7 +592,7 @@ def get_daily_drawdown_pct(start_balance: float = 0.0) -> float:
             if account.balance <= 0:
                 return 0.0
             dd = (account.balance - account.equity) / account.balance * 100
-            bot_log.info(
+            bot_log.debug(
                 "DD Check (fallback equity) | balance=%.2f | equity=%.2f | dd=%.2f%% | max=%.1f%%",
                 account.balance, account.equity, dd, config.MAX_DAILY_DRAWDOWN
             )
@@ -740,7 +740,9 @@ def pre_ia_filter(data: dict, mode: str = "normal", start_balance: float = 0.0) 
             "vérification drawdown ignorée pour éviter un faux SKIP."
         )
     else:
-        dd = get_daily_drawdown_pct(start_balance=start_balance)  # log DD Check inclus
+        dd = get_daily_drawdown_pct(start_balance=start_balance)
+        # Log INFO uniquement lors du filtre pré-IA (toutes les 15 min)
+        bot_log.info("Drawdown Check | dd=%.2f%% | max=%.1f%%", dd, config.MAX_DAILY_DRAWDOWN)
         if dd >= config.MAX_DAILY_DRAWDOWN:
             return False, f"SKIP: Max DD ({dd:.2f}% >= {config.MAX_DAILY_DRAWDOWN}%) | Heure={now_str}"
 
