@@ -571,48 +571,22 @@ def are_timeframes_aligned(data: dict) -> bool:
 
 def pre_ia_filter(data: dict) -> tuple[bool, str]:
     """
-    Applique tous les filtres pré-IA.
-    Retourne (True, "") si tout est OK, (False, raison) sinon.
+    Applique UNIQUEMENT les filtres vitaux (M15).
+    Libéré pour phase de test intensive.
     """
-    # Session active
+    # 1. Session active (0-24h configuré)
     if not is_active_session():
-        return False, "Session inactive (hors London/NY)"
+        return False, "Session OFF"
 
-    # Trades simultanés
-    open_count = get_open_trades_count()
-    if open_count >= config.MAX_SIMULTANEOUS_TRADES:
-        return False, f"Max trades atteint ({open_count}/{config.MAX_SIMULTANEOUS_TRADES})"
+    # 2. Trades simultanés
+    if get_open_trades_count() >= config.MAX_SIMULTANEOUS_TRADES:
+        return False, "Max trades"
 
-    # Drawdown journalier
-    dd = get_daily_drawdown_pct()
-    if dd >= config.MAX_DAILY_DRAWDOWN:
-        return False, f"Drawdown journalier atteint ({dd:.2f}% >= {config.MAX_DAILY_DRAWDOWN}%)"
+    # 3. Drawdown journalier
+    if get_daily_drawdown_pct() >= config.MAX_DAILY_DRAWDOWN:
+        return False, "Max DD"
 
-    # Alignement des timeframes
-    if not are_timeframes_aligned(data):
-        return False, "Timeframes non alignés (M15/H1/H4)"
-
-    # Volatilité ATR
-    atr = data["M15"]["ind"]["atr"]
-    if atr < config.ATR_MIN_THRESHOLD:
-        return False, f"Volatilité trop faible (ATR={atr:.1f})"
-    if atr > config.ATR_MAX_THRESHOLD:
-        return False, f"Volatilité trop élevée (ATR={atr:.1f})"
-
-    # FILTRES DE SÉCURITÉ SUPPLÉMENTAIRES (Or)
-    # 1. Spread
-    symbol_info = mt5.symbol_info(config.MT5_SYMBOL)
-    tick = mt5.symbol_info_tick(config.MT5_SYMBOL)
-    if tick and symbol_info:
-        current_spread = int(round((tick.ask - tick.bid) / symbol_info.point))
-        if current_spread > config.MAX_SPREAD_POINTS:
-            return False, f"Spread trop élevé ({current_spread} pts)"
-
-    # 2. Calendrier Économique
-    is_news, news_name = is_high_impact_news()
-    if is_news:
-        return False, f"News majeure : {news_name}"
-
+    # TOUT LE RESTE EST DÉSACTIVÉ (News, Spread, ATR, Alignement)
     return True, ""
 
 
@@ -659,16 +633,7 @@ async def check_proactive_alerts(state_obj) -> None:
                 f"Risque réduit à {state_obj.max_risk_pct}% (50%)."
             )
 
-    # 4. Spread anormal (déjà dans pre_ia_filter — log seul ici si hors session)
-    try:
-        symbol_info = mt5.symbol_info(config.MT5_SYMBOL)
-        tick = mt5.symbol_info_tick(config.MT5_SYMBOL)
-        if tick and symbol_info:
-            current_spread = int(round((tick.ask - tick.bid) / symbol_info.point))
-            if current_spread > config.MAX_SPREAD_POINTS * 2:
-                send_telegram(f"📊 <b>Spread anormal détecté : {current_spread} pts.</b> Trade ignoré.")
-    except Exception:
-        pass
+
 
 
 
