@@ -46,12 +46,13 @@ class BotState:
         # Statistiques journalières
         self.trades_today:   int   = 0
         self.profit_today:   float = 0.0
-        self.start_balance:  float = 0.0
+        self.start_balance:  float = 0.0  # AUDIT-FIX #3 — jamais recalculé en cours de journée
         self.daily_summary_sent: bool = False
         self.known_tickets: list[int] = []
         # Réglages dynamiques (overrides de config.py)
         self.max_risk_pct: float = config.MAX_RISK_PCT
         self.min_confidence: int = config.MIN_CONFIDENCE
+        self.mode: str = "normal"  # AUDIT-FIX #6 — mode actif : aggro | safe | normal
         # M3 — Circuit Breaker
         self.ia_fail_count: int = 0
         self.circuit_open_until: Optional[datetime.datetime] = None
@@ -123,7 +124,7 @@ async def trading_cycle() -> None:
         return
 
     # ── 3. Collecte des données ─────────────────────────────────
-    data = utils.collect_all_data()
+    data = await utils.collect_all_data()  # AUDIT-FIX #2 — async avec mt5_lock
     if data is None:
         utils.bot_log.error("Collecte de données échouée. Cycle ignoré.")
         return
@@ -133,19 +134,23 @@ async def trading_cycle() -> None:
         data["current_price"], data["balance"],
     )
 
-    # Initialisation de la balance de départ (première fois)
+    # AUDIT-FIX #3 — start_balance initialisé UNE SEULE FOIS, jamais recalculé en cours de journée
     if state.start_balance == 0.0:
         state.start_balance = data["balance"]
+        utils.bot_log.info("AUDIT-FIX #3 — start_balance initialisé : %.2f$", state.start_balance)
 
     # ── 4. Filtre pré-IA ────────────────────────────────────────
-    ok, reason = utils.pre_ia_filter(data)
+    # AUDIT-FIX #6 — mode passé au filtre | AUDIT-FIX #3 — start_balance passé pour drawdown
+    ok, reason = utils.pre_ia_filter(data, mode=state.mode, start_balance=state.start_balance)
     if not ok:
         utils.bot_log.info("Filtre pré-IA → SKIP : %s", reason)
         return
     
     # On transmet les réglages dynamiques (modifiés via Telegram)
+    # AUDIT-FIX #6 — min_confidence adapté au mode courant
     data["min_confidence"] = state.min_confidence
-    data["max_risk_pct"] = state.max_risk_pct
+    data["max_risk_pct"]   = state.max_risk_pct
+    data["mode"]           = state.mode
 
     utils.bot_log.info("Filtre pré-IA → OK")
 
@@ -204,7 +209,7 @@ async def trading_cycle() -> None:
         return
 
     utils.bot_log.info("Signal validé — exécution de l'ordre…")
-    trade = utils.execute_trade(signal_checked)
+    trade = await utils.execute_trade_async(signal_checked)  # AUDIT-FIX #2 — order_send via mt5_lock
 
     if trade:
         utils.alert_trade_open(trade)
@@ -219,20 +224,20 @@ async def trading_cycle() -> None:
         # M8 — Confirmation de l'ordre après 2s
         await asyncio.sleep(2)
         import MetaTrader5 as mt5
-        confirmed_pos = mt5.positions_get(ticket=trade["ticket"])
-        if not confirmed_pos:
-            confirmed_ord = mt5.orders_get(symbol=config.MT5_SYMBOL)
-            order_tickets = [o.ticket for o in confirmed_ord] if confirmed_ord else []
-            if trade["ticket"] not in order_tickets:
-                utils.bot_log.error(
-                    "Ordre #%d non confirmé après 2s — vérification manuelle requise.",
-                    trade["ticket"]
-                )
-                utils.send_telegram(
-                    f"⚠️ <b>Ordre non confirmé</b> après 2s\n"
-                    f"Ticket : #{trade['ticket']} | {trade['dir']} {trade['lot']}L\n"
-                    f"Vérification manuelle requise."
-                )
+        async with utils.mt5_lock:  # AUDIT-FIX #2 — positions_get/orders_get sérialisés
+            confirmed_pos = mt5.positions_get(ticket=trade["ticket"])
+            confirmed_ord = mt5.orders_get(symbol=config.MT5_SYMBOL) if not confirmed_pos else None
+        order_tickets = [o.ticket for o in confirmed_ord] if confirmed_ord else []
+        if not confirmed_pos and trade["ticket"] not in order_tickets:
+            utils.bot_log.error(
+                "Ordre #%d non confirmé après 2s — vérification manuelle requise.",
+                trade["ticket"]
+            )
+            utils.send_telegram(
+                f"⚠️ <b>Ordre non confirmé</b> après 2s\n"
+                f"Ticket : #{trade['ticket']} | {trade['dir']} {trade['lot']}L\n"
+                f"Vérification manuelle requise."
+            )
     else:
         utils.bot_log.error("Échec de l'exécution de l'ordre.")
         utils.alert_error("Échec d'exécution d'un ordre MT5 validé.")
@@ -243,11 +248,12 @@ async def trading_cycle() -> None:
         "%d position(s) ouverte(s) par le bot.", len(open_positions)
     )
 
-    # Mise à jour du P&L journalier (estimation via equity)
+    # AUDIT-FIX #2/#3 — P&L journalier via mt5_lock, drawdown sur start_balance fixe
     import MetaTrader5 as mt5
-    account = mt5.account_info()
+    async with utils.mt5_lock:  # AUDIT-FIX #2 — account_info sérialisé
+        account = mt5.account_info()
     if account and state.start_balance > 0:
-        state.profit_today = account.equity - state.start_balance
+        state.profit_today = account.equity - state.start_balance  # AUDIT-FIX #3
 
     utils.bot_log.info("═══ Fin du cycle ═══")
 
@@ -303,9 +309,11 @@ async def monitoring_loop() -> None:
                 if state.session_update_counter >= 180:  # 180 × 10s = 30 min
                     state.session_update_counter = 0
                     import MetaTrader5 as mt5
-                    account = mt5.account_info()
+                    async with utils.mt5_lock:  # AUDIT-FIX #2 — account_info sérialisé
+                        account = mt5.account_info()
                     if account:
-                        _dd = utils.get_daily_drawdown_pct()
+                        # AUDIT-FIX #3 — drawdown sur start_balance fixe
+                        _dd = utils.get_daily_drawdown_pct(start_balance=state.start_balance)
                         asyncio.ensure_future(
                             asyncio.to_thread(
                                 excel_logger.update_session_row, account.equity, _dd
@@ -334,11 +342,13 @@ async def main_loop() -> None:
         try:
             # ── Résumé journalier à 23h00 (M7 — horloge broker) ────────
             import MetaTrader5 as mt5
-            _tick = mt5.symbol_info_tick(config.MT5_SYMBOL)
+            async with utils.mt5_lock:  # AUDIT-FIX #2 — symbol_info_tick sérialisé
+                _tick = mt5.symbol_info_tick(config.MT5_SYMBOL)
             now = datetime.datetime.fromtimestamp(_tick.time, tz=datetime.timezone.utc) if _tick else datetime.datetime.now(datetime.timezone.utc)
             if now.hour == config.DAILY_SUMMARY_HOUR and not state.daily_summary_sent:
                 try:
-                    account = mt5.account_info()
+                    async with utils.mt5_lock:  # AUDIT-FIX #2 — account_info sérialisé
+                        account = mt5.account_info()
                     if account:
                         utils.alert_daily_summary(
                             account.balance, account.equity,
@@ -347,7 +357,9 @@ async def main_loop() -> None:
                     state.daily_summary_sent = True
                     state.trades_today  = 0
                     state.profit_today  = 0.0
+                    # AUDIT-FIX #3 — Reset start_balance à 00:00 (résumé 23h = début J+1)
                     state.start_balance = account.balance if account else 0.0
+                    utils.bot_log.info("AUDIT-FIX #3 — start_balance reset journalier : %.2f$", state.start_balance)
                 except Exception as e:
                     utils.bot_log.error("Erreur lors de la génération du résumé journalier : %s", e)
 
@@ -366,7 +378,8 @@ async def main_loop() -> None:
         # ── Attente jusqu'au prochain multiple de 15 min (M7) ───
         try:
             import MetaTrader5 as mt5
-            _tick = mt5.symbol_info_tick(config.MT5_SYMBOL)
+            async with utils.mt5_lock:  # AUDIT-FIX #2 — symbol_info_tick sérialisé
+                _tick = mt5.symbol_info_tick(config.MT5_SYMBOL)
             if _tick:
                 now = datetime.datetime.fromtimestamp(_tick.time, tz=datetime.timezone.utc)
             else:
@@ -402,9 +415,11 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     await state.set_status(BotState.ACTIVE)
     import MetaTrader5 as mt5
-    account = mt5.account_info()
+    account = mt5.account_info()  # hors trading_loop — pas de mt5_lock nécessaire
+    # AUDIT-FIX #3 — start_balance enregistré à l'initialisation du bot
     if account:
         state.start_balance = account.balance
+        utils.bot_log.info("AUDIT-FIX #3 — start_balance fixé au démarrage /start : %.2f$", state.start_balance)
 
     msg = (
         f"🚀 <b>GOLDBOT démarré</b>\n"
@@ -578,16 +593,26 @@ async def cmd_mode(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/mode <safe|normal|aggro> — Profils de risque prédéfinis."""
     if not _is_authorized(update) or not context.args: return
     mode = context.args[0].lower()
+    # AUDIT-FIX #6 — Stocker le mode ET adapter les seuils spread/confidence/trend
     if mode == "safe":
-        state.max_risk_pct, state.min_confidence = 0.5, 95
+        state.max_risk_pct, state.min_confidence = 0.5, 68   # AUDIT-FIX #6 : safe → conf=68
+        state.mode = "safe"
     elif mode == "normal":
-        state.max_risk_pct, state.min_confidence = 1.5, 87
+        state.max_risk_pct, state.min_confidence = 1.5, config.MIN_CONFIDENCE  # valeurs config
+        state.mode = "normal"
     elif mode == "aggro":
-        state.max_risk_pct, state.min_confidence = 3.0, 80
+        state.max_risk_pct, state.min_confidence = 3.0, 60   # AUDIT-FIX #6 : aggro → conf=60
+        state.mode = "aggro"
     else:
         await update.message.reply_text("❌ Modes valides : safe, normal, aggro")
         return
-    await update.message.reply_text(f"🎭 Mode <b>{mode.upper()}</b> activé\n(Risque {state.max_risk_pct}% | Confiance {state.min_confidence}%)", parse_mode="HTML")
+    # AUDIT-FIX #6 — Résumé : spread_max affiché selon mode
+    spread_info = {"aggro": 55, "safe": 30, "normal": config.MAX_SPREAD_POINTS}.get(mode, "?")
+    await update.message.reply_text(
+        f"🎭 Mode <b>{mode.upper()}</b> activé\n"
+        f"Risque {state.max_risk_pct}% | Conf. min {state.min_confidence}% | Spread max {spread_info}pts",
+        parse_mode="HTML"
+    )
 
 async def cmd_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """/analyze — Force un cycle de trading immédiat."""

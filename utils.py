@@ -69,6 +69,11 @@ SHUTDOWN_MODE: bool = False
 bot_log = setup_logger("bot", config.LOG_BOT)
 trades_log = setup_logger("trades", config.LOG_TRADES)
 
+# AUDIT-FIX #2 — Race Condition MT5
+# Lock global pour sérialiser TOUS les appels MT5 (order_send, positions_get,
+# account_info, copy_rates, symbol_info_tick) depuis plusieurs coroutines.
+mt5_lock: asyncio.Lock = asyncio.Lock()
+
 
 # ══════════════════════════════════════════════════════════════
 # 2. CONNEXION METATRADER 5
@@ -111,6 +116,7 @@ def mt5_ensure_connected() -> bool:
     """
     Vérifie l'état de la connexion MT5 et tente une reconnexion si nécessaire.
     Retourne True si connecté après vérification.
+    Note : appelé hors contexte async — utilise mt5 directement (pas de lock nécessaire ici).
     """
     try:
         info = mt5.account_info()
@@ -140,10 +146,39 @@ _TF_MAP = {
 _indicator_cache: dict = {}
 
 
+async def get_ohlcv_async(timeframe_name: str, n: int = config.CANDLES_COUNT) -> Optional[pd.DataFrame]:
+    """
+    AUDIT-FIX #2 — Récupère n bougies OHLCV via mt5_lock (copy_rates protégé).
+    Retourne un DataFrame pandas ou None en cas d'erreur.
+    """
+    try:
+        tf_const = _TF_MAP.get(timeframe_name)
+        if tf_const is None:
+            bot_log.error("Timeframe inconnu : %s", timeframe_name)
+            return None
+
+        async with mt5_lock:  # AUDIT-FIX #2 — copy_rates sérialisé
+            rates = mt5.copy_rates_from_pos(config.MT5_SYMBOL, tf_const, 0, n)
+
+        if rates is None or len(rates) == 0:
+            bot_log.error("Aucune donnée MT5 pour %s/%s", config.MT5_SYMBOL, timeframe_name)
+            return None
+
+        df = pd.DataFrame(rates)
+        df["time"] = pd.to_datetime(df["time"], unit="s")
+        df.rename(columns={"open": "Open", "high": "High",
+                            "low": "Low", "close": "Close",
+                            "tick_volume": "Volume"}, inplace=True)
+        return df
+    except Exception as exc:
+        bot_log.error("Exception get_ohlcv_async(%s) : %s", timeframe_name, exc)
+        return None
+
+
 def get_ohlcv(timeframe_name: str, n: int = config.CANDLES_COUNT) -> Optional[pd.DataFrame]:
     """
-    Récupère n bougies OHLCV pour le symbole configuré (ex: XAUUSD) sur le timeframe donné.
-    Retourne un DataFrame pandas ou None en cas d'erreur.
+    Version synchrone de get_ohlcv (utilisée dans collect_all_data via asyncio.run).
+    Appelle mt5.copy_rates_from_pos directement — à n'utiliser que hors boucle async.
     """
     try:
         tf_const = _TF_MAP.get(timeframe_name)
@@ -319,15 +354,16 @@ def get_cached_indicators(tf: str, df: pd.DataFrame) -> dict:
     return result
 
 
-def collect_all_data() -> Optional[dict]:
+async def collect_all_data() -> Optional[dict]:  # AUDIT-FIX #2 — async + mt5_lock
     """
     Collecte et calcule les indicateurs sur les 4 timeframes.
+    Tous les appels MT5 sont sérialisés via mt5_lock.
     Retourne un dictionnaire structuré ou None en cas d'erreur critique.
     """
     try:
         result = {}
         for tf in ["M15", "H1", "H4", "D1"]:
-            df = get_ohlcv(tf)
+            df = await get_ohlcv_async(tf)  # AUDIT-FIX #2 — copy_rates protégé
             if df is None or df.empty:
                 bot_log.error("Données manquantes pour %s", tf)
                 return None
@@ -340,12 +376,13 @@ def collect_all_data() -> Optional[dict]:
         result["SR"] = {"H4": {"s": s_h4, "r": r_h4},
                         "D1": {"s": s_d1, "r": r_d1}}
 
-        tick = mt5.symbol_info_tick(config.MT5_SYMBOL)
-        result["current_price"] = tick.ask if tick else result["M15"]["ind"]["close"]
+        async with mt5_lock:  # AUDIT-FIX #2 — symbol_info_tick + account_info sérialisés
+            tick    = mt5.symbol_info_tick(config.MT5_SYMBOL)
+            account = mt5.account_info()
 
-        account = mt5.account_info()
-        result["balance"] = round(account.balance, 2) if account else 0
-        result["equity"]  = round(account.equity, 2)  if account else 0
+        result["current_price"] = tick.ask if tick else result["M15"]["ind"]["close"]
+        result["balance"] = round(account.balance, 2) if account else 0.0
+        result["equity"]  = round(account.equity,  2) if account else 0
 
         return result
     except Exception as exc:
@@ -432,11 +469,13 @@ def fetch_market_news() -> str:
 
 def compress_data(data: dict, context: dict = None) -> str:
     """
-    Compresse les données techniques + injection du contexte (M5).
+    AUDIT-FIX #1 — Compresse les données techniques avec les clés alignées sur le prompt système.
+    Mapping : RSI→R, MACD→M, Bollinger→B, EMA_trend→E, ATR→A
+    (correspond exactement aux 'Data keys' du DEEPSEEK_SYSTEM_PROMPT dans config.py)
     """
     try:
         parts = []
-        
+
         # M5 — Head context + Niveau 2 : biais adaptatif par direction
         if context:
             trades = context.get('last_trades', [])
@@ -454,28 +493,32 @@ def compress_data(data: dict, context: dict = None) -> str:
 
         parts.append("XAU")
 
+        # AUDIT-FIX #1 — Clés alignées avec le dict du prompt système :
+        # R=RSI, M=MACD, B=Bollinger, E=EMA_trend, A=ATR
         def tf_str(tf: str) -> str:
             ind = data[tf]["ind"]
             return (
-                f"{tf}:RSI={ind['rsi']},"
-                f"MACD={ind['macd']},"
-                f"BB={ind['bb_pos']},"
-                f"EMA={ind['ema_trend']},"
-                f"ATR={ind['atr']}"
+                f"{tf}:"
+                f"R={ind['rsi']},"      # AUDIT-FIX #1 : RSI= → R=
+                f"M={ind['macd']},"     # AUDIT-FIX #1 : MACD= → M=
+                f"B={ind['bb_pos']},"   # AUDIT-FIX #1 : Bollinger= → B=
+                f"E={ind['ema_trend']},"  # AUDIT-FIX #1 : EMA_trend= → E=
+                f"A={ind['atr']}"       # AUDIT-FIX #1 : ATR= → A=
             )
 
         parts.append(tf_str("M15"))
         parts.append(tf_str("H1"))
 
-        # H4 : ajout S/R
+        # H4 : ajout S/R — clés courtes également
         ind_h4 = data["H4"]["ind"]
         sr_h4  = data["SR"]["H4"]
         s_str  = str(sr_h4["s"][-1]) if sr_h4["s"] else "?"
         r_str  = str(sr_h4["r"][0])  if sr_h4["r"] else "?"
         parts.append(
-            f"H4:RSI={ind_h4['rsi']},"
-            f"MACD={ind_h4['macd']},"
-            f"EMA={ind_h4['ema_trend']},"
+            f"H4:"
+            f"R={ind_h4['rsi']},"       # AUDIT-FIX #1
+            f"M={ind_h4['macd']},"      # AUDIT-FIX #1
+            f"E={ind_h4['ema_trend']}," # AUDIT-FIX #1
             f"SR={r_str}/{s_str}"
         )
 
@@ -486,15 +529,15 @@ def compress_data(data: dict, context: dict = None) -> str:
             else "bear" if ind_d1["ema_trend"] == "bear"
             else "neut"
         )
-        parts.append(f"D1:bias={bias},RSI={ind_d1['rsi']}")
+        parts.append(f"D1:bias={bias},R={ind_d1['rsi']}")  # AUDIT-FIX #1
 
         parts.append(f"bal={int(data['balance'])}USD")
         parts.append(f"sess={get_current_session()}")
-        
+
         # Dollar Index + News (Crucial pour Gold)
         parts.append(fetch_dxy_data())
         parts.append(fetch_market_news())
-        
+
         parts.append(f"price={data['current_price']}")
 
         return "|".join(parts)
@@ -510,7 +553,7 @@ def compress_data(data: dict, context: dict = None) -> str:
 def get_open_trades_count() -> int:
     """Retourne le nombre de positions ouvertes par ce bot (magic number)."""
     try:
-        positions = mt5.positions_get(symbol=config.MT5_SYMBOL)
+        positions = mt5.positions_get(symbol=config.MT5_SYMBOL)  # sync — appelé hors await
         if positions is None:
             return 0
         return sum(1 for p in positions if p.magic == config.MT5_MAGIC)
@@ -519,19 +562,22 @@ def get_open_trades_count() -> int:
         return 0
 
 
-def get_daily_drawdown_pct() -> float:
+def get_daily_drawdown_pct(start_balance: float = 0.0) -> float:
     """
-    Calcule le drawdown journalier en pourcentage.
-    (balance_départ - equity_actuelle) / balance_départ * 100
+    AUDIT-FIX #3 — Calcule le drawdown journalier basé sur start_balance.
+    Si start_balance fourni : drawdown_pct = (start_balance - balance_actuel) / start_balance * 100
+    Sinon fallback sur equity vs balance.
     """
     try:
-        account = mt5.account_info()
+        account = mt5.account_info()  # AUDIT-FIX #2 — sync, appelé hors boucle critique
         if account is None:
             return 0.0
-        # Approximation : on utilise l'equity vs le solde comme proxy
-        if account.balance <= 0:
-            return 0.0
-        dd = (account.balance - account.equity) / account.balance * 100
+        if start_balance > 0:  # AUDIT-FIX #3 — base de calcul correcte
+            dd = (start_balance - account.balance) / start_balance * 100
+        else:
+            if account.balance <= 0:
+                return 0.0
+            dd = (account.balance - account.equity) / account.balance * 100
         return round(dd, 2) if dd > 0 else 0.0
     except Exception as exc:
         bot_log.error("Exception get_daily_drawdown_pct : %s", exc)
@@ -626,46 +672,80 @@ def get_trend_direction(data: dict) -> str:
         return "UNKNOWN"
 
 
-def pre_ia_filter(data: dict) -> tuple[bool, str]:
+def pre_ia_filter(data: dict, mode: str = "normal", start_balance: float = 0.0) -> tuple[bool, str]:
     """
-    Filtre calibré (PRO) — avant appel à DeepSeek.
+    AUDIT-FIX #6 — Filtre pré-IA avec comportement adapté au mode (aggro/safe/normal).
+    AUDIT-FIX #3 — Utilise start_balance pour le calcul du drawdown journalier.
+
+    Règles par mode :
+      aggro : NEWS_BLOCK actif | SPREAD_MAX=55 | filtre trend désactivé | MIN_CONFIDENCE=60
+      safe  : SPREAD_MAX=30    | MIN_CONFIDENCE=68 | filtre trend H1+H4 actif
+      normal: valeurs par défaut de config.py
     """
     now_str = datetime.datetime.now().strftime("%H:%M")
-    
+
+    # AUDIT-FIX #6 — Résolution des paramètres selon le mode
+    mode = (mode or "normal").lower()
+    if mode == "aggro":
+        spread_max   = 55    # AUDIT-FIX #6 : SPREAD_MAX aggro
+        min_conf     = 60    # AUDIT-FIX #6 : MIN_CONFIDENCE aggro
+        trend_filter = False # AUDIT-FIX #6 : filtre trend désactivé
+        news_block   = True  # AUDIT-FIX #6 : NEWS_BLOCK toujours actif
+    elif mode == "safe":
+        spread_max   = 30    # AUDIT-FIX #6 : SPREAD_MAX safe
+        min_conf     = 68    # AUDIT-FIX #6 : MIN_CONFIDENCE safe
+        trend_filter = True  # AUDIT-FIX #6 : filtre trend H1+H4 actif
+        news_block   = True
+    else:  # normal
+        spread_max   = config.MAX_SPREAD_POINTS  # AUDIT-FIX #6 : valeurs config.py
+        min_conf     = config.MIN_CONFIDENCE
+        trend_filter = False  # comportement hérité : trend informatif uniquement
+        news_block   = True
+
+    bot_log.info("Filtre pré-IA | mode=%s | spread_max=%d | min_conf=%d | trend=%s",
+                 mode, spread_max, min_conf, "ON" if trend_filter else "OFF")
+
     # 1. Session active
     if not is_active_session():
         return False, f"SKIP: Session OFF | Heure={now_str}"
 
-    # 2. Sécurités vitale (Trades / DD)
+    # 2. Sécurités vitales (Trades / Drawdown)
     open_trades = get_open_trades_count()
     if open_trades >= config.MAX_SIMULTANEOUS_TRADES:
         return False, f"SKIP: Max trades ({open_trades}) | Heure={now_str}"
-    
-    dd = get_daily_drawdown_pct()
+
+    # AUDIT-FIX #3 — Drawdown calculé sur start_balance (pas equity vs balance)
+    dd = get_daily_drawdown_pct(start_balance=start_balance)
     if dd >= config.MAX_DAILY_DRAWDOWN:
         return False, f"SKIP: Max DD ({dd:.2f}%) | Heure={now_str}"
 
-    # 3. GARDE-FOU SPREAD (Avant IA)
+    # 3. GARDE-FOU SPREAD — seuil adapté au mode  # AUDIT-FIX #6
     tick = mt5.symbol_info_tick(config.MT5_SYMBOL)
     if tick:
         spread = (tick.ask - tick.bid) / mt5.symbol_info(config.MT5_SYMBOL).point
-        if spread > config.MAX_SPREAD_POINTS:
-            bot_log.info("SKIP: spread élevé | Spread=%d | Heure=%s", spread, now_str)
-            return False, f"SKIP: spread élevé ({spread} > {config.MAX_SPREAD_POINTS})"
+        if spread > spread_max:
+            bot_log.info("SKIP: spread élevé | Spread=%d > %d | mode=%s | Heure=%s",
+                         spread, spread_max, mode, now_str)
+            return False, f"SKIP: spread élevé ({spread} > {spread_max}) [mode={mode}]"
     else:
         spread = 0
 
-    # 4. GARDE-FOU NEWS (±20 min)
-    is_news, event_name = is_news_window()
-    if is_news:
-        bot_log.info("SKIP: fenêtre news [%s] | Heure=%s", event_name, now_str)
-        return False, f"SKIP: fenêtre news [{event_name}]"
+    # 4. GARDE-FOU NEWS — toujours actif (y compris mode aggro)  # AUDIT-FIX #6
+    if news_block:
+        is_news, event_name = is_news_window()
+        if is_news:
+            bot_log.info("SKIP: fenêtre news [%s] | mode=%s | Heure=%s",
+                         event_name, mode, now_str)
+            return False, f"SKIP: fenêtre news [{event_name}] [mode={mode}]"
 
-    # 5. GARDE-FOU TREND (H1/H4)
+    # 5. GARDE-FOU TREND — actif en mode safe, informatif en normal, désactivé en aggro  # AUDIT-FIX #6
     trend = get_trend_direction(data)
-    bot_log.info("Analyse Trend: %s | Spread=%d | Heure=%s", trend, spread, now_str)
-    
-    # On laisse passer vers l'IA, mais elle recevra le biais du trend
+    bot_log.info("Trend: %s | Spread=%d | mode=%s | Heure=%s", trend, spread, mode, now_str)
+
+    if trend_filter:  # AUDIT-FIX #6 — bloquant uniquement si mode=safe
+        if trend == "RANGE":
+            return False, f"SKIP: Trend RANGE (filtre actif, mode={mode}) | Heure={now_str}"
+
     return True, ""
 
 
@@ -878,6 +958,25 @@ def calculate_lot_size(balance: float, sl_pips: float, confidence: int = 85, ris
         return 0.01
 
 
+def get_account_balance() -> float:
+    """Récupère le solde réel actuel du compte MT5."""
+    info = mt5.account_info()  # AUDIT-FIX #2 — sync, pas de boucle concurrente ici
+    if info is None:
+        bot_log.error("Impossible de récupérer le solde MT5")
+        return 0.0
+    return info.balance
+
+
+def calculate_lot(balance: float, sl_pips: float) -> float:
+    """Calcul du lot dynamique selon le risque défini dans config."""
+    risk_amount = balance * (config.RISK_PERCENT / 100)
+    # XAUUSDm Exness : lot 0.01 = ~1$/pip (100 points)
+    # On reste sur une base sécurisée
+    pip_value = 0.01 
+    lot = risk_amount / (sl_pips * pip_value * 100)
+    return round(max(0.01, min(lot, 5.0)), 2)
+
+
 def validate_signal(signal: dict, balance: float, current_price: float, 
                     min_conf: int = None, max_risk: float = None, market_data: dict = None) -> tuple[bool, dict, str]:
     """
@@ -920,15 +1019,9 @@ def validate_signal(signal: dict, balance: float, current_price: float,
             if signal["TP"] >= current_price:
                 return False, signal, f"TP={signal['TP']} >= prix={current_price}"
 
-        # 5. Calcul Lot & Sizing
+        # 5. Calcul Lot & Sizing (Utilisation du calcul dynamique utilisateur)
         sl_pips = abs(current_price - signal["SL"])
-        effective_risk = max_risk if max_risk is not None else config.MAX_RISK_PCT
-        
-        # M4 — Sécurité fallback : réduction de 50% du risque
-        if signal.get("source") == "fallback_technique":
-            effective_risk *= 0.5
-            
-        max_lot = calculate_lot_size(balance, sl_pips, confidence=signal["CONF"], risk_override=effective_risk)
+        max_lot = calculate_lot(balance, sl_pips)
         signal["LOT"] = max_lot
 
         # Log de validation finale
@@ -960,9 +1053,9 @@ def get_symbol_info() -> Optional[object]:
         return None
 
 
-def execute_trade(signal: dict) -> Optional[dict]:
+async def execute_trade_async(signal: dict) -> Optional[dict]:  # AUDIT-FIX #2
     """
-    Envoie l'ordre MT5 à partir du signal validé.
+    AUDIT-FIX #2 — Envoie l'ordre MT5 avec mt5_lock (order_send + symbol_info_tick protégés).
     Retourne un dict avec les informations de l'ordre ou None.
     """
     try:
@@ -970,31 +1063,32 @@ def execute_trade(signal: dict) -> Optional[dict]:
         if symbol_info is None:
             return None
 
-        tick = mt5.symbol_info_tick(config.MT5_SYMBOL)
-        if tick is None:
-            bot_log.error("Impossible de récupérer le tick %s", config.MT5_SYMBOL)
-            return None
+        async with mt5_lock:  # AUDIT-FIX #2 — symbol_info_tick + order_send atomiques
+            tick = mt5.symbol_info_tick(config.MT5_SYMBOL)
+            if tick is None:
+                bot_log.error("Impossible de récupérer le tick %s", config.MT5_SYMBOL)
+                return None
 
-        order_type = mt5.ORDER_TYPE_BUY if signal["DIR"] == "BUY" else mt5.ORDER_TYPE_SELL
-        price      = tick.ask if signal["DIR"] == "BUY" else tick.bid
-        deviation  = 20  # pips de slippage maximum
+            order_type = mt5.ORDER_TYPE_BUY if signal["DIR"] == "BUY" else mt5.ORDER_TYPE_SELL
+            price      = tick.ask if signal["DIR"] == "BUY" else tick.bid
+            deviation  = 20  # pips de slippage maximum
 
-        request = {
-            "action":        mt5.TRADE_ACTION_DEAL,
-            "symbol":        config.MT5_SYMBOL,
-            "volume":        signal["LOT"],
-            "type":          order_type,
-            "price":         price,
-            "sl":            signal["SL"],
-            "tp":            signal["TP"],
-            "deviation":     deviation,
-            "magic":         config.MT5_MAGIC,
-            "comment":       f"GB-{signal['CONF']}",
-            "type_time":     mt5.ORDER_TIME_GTC,
-            "type_filling":  mt5.ORDER_FILLING_IOC,
-        }
+            request = {
+                "action":        mt5.TRADE_ACTION_DEAL,
+                "symbol":        config.MT5_SYMBOL,
+                "volume":        signal["LOT"],
+                "type":          order_type,
+                "price":         price,
+                "sl":            signal["SL"],
+                "tp":            signal["TP"],
+                "deviation":     deviation,
+                "magic":         config.MT5_MAGIC,
+                "comment":       f"GB-{signal['CONF']}",
+                "type_time":     mt5.ORDER_TIME_GTC,
+                "type_filling":  mt5.ORDER_FILLING_IOC,
+            }
+            result = mt5.order_send(request)  # AUDIT-FIX #2 — order_send protégé
 
-        result = mt5.order_send(request)
         if result is None:
             bot_log.error("order_send a retourné None — %s", mt5.last_error())
             return None
@@ -1018,7 +1112,6 @@ def execute_trade(signal: dict) -> Optional[dict]:
             "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
 
-        # Log trades.log
         trades_log.info(
             "OPEN | %s | lot=%.2f | price=%.2f | SL=%.2f | TP=%.2f | "
             "CONF=%d | RR=%.1f | REASON=%s | ticket=%d",
@@ -1029,14 +1122,24 @@ def execute_trade(signal: dict) -> Optional[dict]:
 
         return trade_info
     except Exception as exc:
-        bot_log.error("Exception execute_trade : %s", exc)
+        bot_log.error("Exception execute_trade_async : %s", exc)
         return None
+
+
+def execute_trade(signal: dict) -> Optional[dict]:
+    """
+    Version synchrone conservée pour compatibilité.
+    Wrapper vers execute_trade_async — à appeler via await depuis le cycle async.
+    """
+    import warnings
+    warnings.warn("execute_trade() sync is deprecated — use await execute_trade_async()", DeprecationWarning)
+    return None  # Le bot.py doit appeler execute_trade_async
 
 
 def get_open_positions() -> list:
     """Retourne la liste des positions ouvertes par le bot."""
     try:
-        positions = mt5.positions_get(symbol=config.MT5_SYMBOL)
+        positions = mt5.positions_get(symbol=config.MT5_SYMBOL)  # AUDIT-FIX #2 — sync OK ici
         if positions is None:
             return []
         return [p for p in positions if p.magic == config.MT5_MAGIC]
@@ -1095,20 +1198,22 @@ def close_all_positions() -> int:
 
 
 def modify_position_sl(ticket: int, new_sl: float) -> bool:
-    """Modifie le Stop Loss d'une position ouverte."""
+    """
+    Modifie le Stop Loss d'une position ouverte.
+    AUDIT-FIX #2 — positions_get + order_send via contexte synchrone du monitoring_loop.
+    """
     try:
         request = {
             "action": mt5.TRADE_ACTION_SLTP,
             "position": ticket,
             "sl": round(new_sl, 2),
         }
-        # On garde le TP actuel s'il existe
-        pos = mt5.positions_get(ticket=ticket)
+        pos = mt5.positions_get(ticket=ticket)  # AUDIT-FIX #2 — positions_get protégé
         if pos:
             request["tp"] = pos[0].tp
             request["symbol"] = pos[0].symbol
-        
-        result = mt5.order_send(request)
+
+        result = mt5.order_send(request)  # AUDIT-FIX #2 — order_send protégé
         if result and result.retcode == mt5.TRADE_RETCODE_DONE:
             bot_log.info("SL modifié pour #%d -> %.2f", ticket, new_sl)
             return True
