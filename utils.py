@@ -915,7 +915,7 @@ def execute_trade(signal: dict) -> Optional[dict]:
             "tp":            signal["TP"],
             "deviation":     deviation,
             "magic":         config.MT5_MAGIC,
-            "comment":       f"GOLDBOT|{signal['REASON']}|CONF={signal['CONF']}",
+            "comment":       f"GB|{signal['REASON']}|{signal['CONF']}"[:30],
             "type_time":     mt5.ORDER_TIME_GTC,
             "type_filling":  mt5.ORDER_FILLING_IOC,
         }
