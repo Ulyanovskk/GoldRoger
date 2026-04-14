@@ -566,18 +566,37 @@ def get_daily_drawdown_pct(start_balance: float = 0.0) -> float:
     """
     AUDIT-FIX #3 — Calcule le drawdown journalier basé sur start_balance.
     Si start_balance fourni : drawdown_pct = (start_balance - balance_actuel) / start_balance * 100
-    Sinon fallback sur equity vs balance.
+    Sinon fallback sur equity vs balance (mode dégradé).
+    Guard : si start_balance == 0.0 → log erreur + retourne 0.0 (jamais de faux déclenchement).
     """
     try:
         account = mt5.account_info()  # AUDIT-FIX #2 — sync, appelé hors boucle critique
         if account is None:
             return 0.0
-        if start_balance > 0:  # AUDIT-FIX #3 — base de calcul correcte
+
+        if start_balance > 0:
+            # AUDIT-FIX #3 — Base de calcul fixée au début de journée
             dd = (start_balance - account.balance) / start_balance * 100
+            bot_log.info(
+                "DD Check | start=%.2f | current=%.2f | dd=%.2f%% | max=%.1f%%",
+                start_balance, account.balance, dd, config.MAX_DAILY_DRAWDOWN
+            )
+        elif start_balance == 0.0:
+            # GUARD — start_balance pas encore initialisé : on ne déclenche PAS l'arrêt
+            bot_log.error(
+                "DD Check IGNORÉ — start_balance=0.0 (non initialisé). "
+                "Drawdown non calculable, retour 0.0 pour éviter un faux arrêt."
+            )
+            return 0.0
         else:
             if account.balance <= 0:
                 return 0.0
             dd = (account.balance - account.equity) / account.balance * 100
+            bot_log.info(
+                "DD Check (fallback equity) | balance=%.2f | equity=%.2f | dd=%.2f%% | max=%.1f%%",
+                account.balance, account.equity, dd, config.MAX_DAILY_DRAWDOWN
+            )
+
         return round(dd, 2) if dd > 0 else 0.0
     except Exception as exc:
         bot_log.error("Exception get_daily_drawdown_pct : %s", exc)
@@ -714,10 +733,16 @@ def pre_ia_filter(data: dict, mode: str = "normal", start_balance: float = 0.0) 
     if open_trades >= config.MAX_SIMULTANEOUS_TRADES:
         return False, f"SKIP: Max trades ({open_trades}) | Heure={now_str}"
 
-    # AUDIT-FIX #3 — Drawdown calculé sur start_balance (pas equity vs balance)
-    dd = get_daily_drawdown_pct(start_balance=start_balance)
-    if dd >= config.MAX_DAILY_DRAWDOWN:
-        return False, f"SKIP: Max DD ({dd:.2f}%) | Heure={now_str}"
+    # AUDIT-FIX #3 — Guard start_balance == 0.0 : on ne bloque jamais si non initialisé
+    if start_balance == 0.0:
+        bot_log.error(
+            "pre_ia_filter — start_balance=0.0 (non initialisé) : "
+            "vérification drawdown ignorée pour éviter un faux SKIP."
+        )
+    else:
+        dd = get_daily_drawdown_pct(start_balance=start_balance)  # log DD Check inclus
+        if dd >= config.MAX_DAILY_DRAWDOWN:
+            return False, f"SKIP: Max DD ({dd:.2f}% >= {config.MAX_DAILY_DRAWDOWN}%) | Heure={now_str}"
 
     # 3. GARDE-FOU SPREAD — seuil adapté au mode  # AUDIT-FIX #6
     tick = mt5.symbol_info_tick(config.MT5_SYMBOL)
@@ -777,20 +802,35 @@ async def check_proactive_alerts(state_obj) -> None:
         bot_log.warning("Latence IA élevée : %.2fs", state_obj.last_ia_latency_s)
         state_obj.last_ia_latency_s = 0.0  # Reset pour éviter spam
 
-    # 3. Drawdown session > 2% → risque réduit
-    dd = get_daily_drawdown_pct()
-    if dd >= 3.0 and state_obj.is_active():
-        await state_obj.set_status("stoppé")
-        close_all_positions()
-        send_telegram("🛑 <b>Drawdown 3% atteint.</b> Arrêt du bot.")
-        bot_log.error("Arrêt automatique : drawdown %.2f%%", dd)
-    elif dd >= 2.0:
-        if state_obj.max_risk_pct > config.MAX_RISK_PCT * 0.5:
-            state_obj.max_risk_pct = round(config.MAX_RISK_PCT * 0.5, 2)
+    # 3. Drawdown proactif — seuils depuis config.MAX_DAILY_DRAWDOWN (jamais hardcodés)
+    # GUARD : si start_balance non initialisé, on ne déclenche PAS l'arrêt automatique
+    start_bal = getattr(state_obj, 'start_balance', 0.0)
+    if start_bal == 0.0:
+        bot_log.error(
+            "check_proactive_alerts — start_balance=0.0 : "
+            "vérification drawdown proactif ignorée pour éviter un faux arrêt."
+        )
+    else:
+        dd = get_daily_drawdown_pct(start_balance=start_bal)  # log DD Check inclus
+        dd_stop   = config.MAX_DAILY_DRAWDOWN        # ex: 10.0% — lu depuis .env
+        dd_reduce = config.MAX_DAILY_DRAWDOWN * 0.5  # ex: 5.0% — seuil réduction risque
+
+        if dd >= dd_stop and state_obj.is_active():
+            await state_obj.set_status("stoppé")
+            close_all_positions()
             send_telegram(
-                f"📉 <b>Drawdown {dd:.2f}% atteint.</b>\n"
-                f"Risque réduit à {state_obj.max_risk_pct}% (50%)."
+                f"🛑 <b>Drawdown {dd:.2f}% ≥ seuil {dd_stop:.0f}%.</b> Arrêt du bot."
             )
+            bot_log.error(
+                "Arrêt automatique : drawdown %.2f%% >= seuil %.1f%%", dd, dd_stop
+            )
+        elif dd >= dd_reduce:
+            if state_obj.max_risk_pct > config.MAX_RISK_PCT * 0.5:
+                state_obj.max_risk_pct = round(config.MAX_RISK_PCT * 0.5, 2)
+                send_telegram(
+                    f"📉 <b>Drawdown {dd:.2f}% ≥ {dd_reduce:.0f}%.</b>\n"
+                    f"Risque réduit à {state_obj.max_risk_pct}% (50% du max)."
+                )
 
 
 

@@ -75,7 +75,7 @@ CANDLES_COUNT: int = 300  # Min 200+100 buffer pour l'EMA 200 — ne pas descend
 # Gestion du risque (STRICTE 1.5%)
 # ──────────────────────────────────────────────
 RISK_PERCENT: float = 1.5
-MAX_DAILY_DRAWDOWN: float = 10.0  # Réduit à 10% selon calibration
+MAX_DAILY_DRAWDOWN: float = float(os.getenv("MAX_DAILY_DRAWDOWN", "10.0"))  # Lu depuis .env — ne jamais hardcoder ailleurs
 MIN_CONFIDENCE: int = int(os.getenv("MIN_CONFIDENCE", "62"))  # Relevé à 62%
 MAX_SIMULTANEOUS_TRADES: int = int(os.getenv("MAX_SIMULTANEOUS_TRADES", "2"))
 MIN_RR: float = 1.3  # Relevé à 1.3
