@@ -533,12 +533,26 @@ def is_active_session() -> bool:
 
 def are_timeframes_aligned(data: dict) -> bool:
     """
-    Vérifie si M15, H1 et H4 pointent dans la même direction générale.
-    Condition : les 3 timeframes ont le même ema_trend (bull ou bear).
+    Vérifie si H1 et H4 pointent dans la même direction générale (tendance de fond).
+    Condition principale : H1 et H4 ont le même ema_trend (bull ou bear).
+    Le M15 peut être en correction/respiration sans bloquer le bot.
+    Un bonus est accordé si M15 est également aligné (loggé).
     """
     try:
-        trends = [data[tf]["ind"]["ema_trend"] for tf in ["M15", "H1", "H4"]]
-        return trends[0] == trends[1] == trends[2] and trends[0] in ("bull", "bear")
+        h1_trend  = data["H1"]["ind"]["ema_trend"]
+        h4_trend  = data["H4"]["ind"]["ema_trend"]
+        m15_trend = data["M15"]["ind"]["ema_trend"]
+
+        if h1_trend == h4_trend and h1_trend in ("bull", "bear"):
+            if m15_trend == h1_trend:
+                bot_log.debug("Timeframes parfaitement alignés (M15+H1+H4 = %s)", h1_trend)
+            else:
+                bot_log.debug(
+                    "Alignement partiel : H1+H4 = %s | M15 = %s (respiration tolérée)",
+                    h1_trend, m15_trend
+                )
+            return True
+        return False
     except Exception as exc:
         bot_log.error("Exception are_timeframes_aligned : %s", exc)
         return False

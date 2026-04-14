@@ -51,7 +51,7 @@ MT5_TIMEFRAMES: dict = {
 }
 
 # Nombre de bougies à récupérer par timeframe
-CANDLES_COUNT: int = 200
+CANDLES_COUNT: int = 300  # Min 200+100 buffer pour l'EMA 200 — ne pas descendre en dessous
 
 # ──────────────────────────────────────────────
 # Gestion du risque (STRICTE 1.5%)
