@@ -11,6 +11,7 @@ bot.py — Orchestrateur principal du GOLDBOT.
 
 import asyncio
 import datetime
+import os
 import signal
 import sys
 import threading
@@ -181,14 +182,20 @@ async def trading_cycle() -> None:
         signal_raw["DIR"], signal_raw["CONF"], signal_raw["RR"], signal_raw["REASON"],
     )
 
+    # ── 0. Vérification arrêt ────────────────────────────────────
+    if utils.SHUTDOWN_MODE: return
+    
     # ── 6. Garde-fous + exécution ────────────────────────────────
     valid, signal_checked, reject_reason = utils.validate_signal(
         signal_raw, data["balance"], data["current_price"],
-        min_conf=state.min_confidence, max_risk=state.max_risk_pct
+        min_conf=state.min_confidence, max_risk=state.max_risk_pct,
+        market_data=data
     )
 
     if not valid:
-        utils.bot_log.info("Signal rejeté par garde-fous : %s", reject_reason)
+        # GARDE-FOU LOGGING #5
+        utils.bot_log.info("%s | Conf=%d%% | Signal=%s", 
+                           reject_reason, signal_raw["CONF"], signal_raw["DIR"])
         # M10 — Log signal refusé (non-bloquant)
         _src = signal_raw.get("source", "deepseek") if signal_raw else "deepseek"
         asyncio.ensure_future(
@@ -771,11 +778,10 @@ def main() -> None:
 
 def _handle_signal(sig, frame) -> None:
     """Gestionnaire de signaux OS (SIGINT, SIGTERM) pour arrêt propre."""
-    utils.bot_log.info("Signal %s reçu — arrêt du bot…", sig)
-    utils.send_telegram("🛑 <b>GOLDBOT</b> : Arrêt OS reçu — fermeture propre.")
-    utils.close_all_positions()
-    utils.mt5_disconnect()
-    sys.exit(0)
+    utils.bot_log.info("Signal %s reçu — arrêt immédiat du bot…", sig)
+    utils.SHUTDOWN_MODE = True
+    # On force la fermeture car l'arrêt du loop peut être lent
+    os._exit(0)
 
 
 if __name__ == "__main__":

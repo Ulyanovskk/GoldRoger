@@ -59,10 +59,12 @@ CANDLES_COUNT: int = 300  # Min 200+100 buffer pour l'EMA 200 — ne pas descend
 # Gestion du risque (STRICTE 1.5%)
 # ──────────────────────────────────────────────
 RISK_PERCENT: float = 1.5
-MAX_DAILY_DRAWDOWN: float = 15.0  # Augmenté à 15% pour les petits comptes (tests)
-MIN_CONFIDENCE: int = int(os.getenv("MIN_CONFIDENCE", "60"))  # Ajusté à 60% pour équilibrer tests et qualité
+MAX_DAILY_DRAWDOWN: float = 10.0  # Réduit à 10% selon calibration
+MIN_CONFIDENCE: int = int(os.getenv("MIN_CONFIDENCE", "62"))  # Relevé à 62%
 MAX_SIMULTANEOUS_TRADES: int = int(os.getenv("MAX_SIMULTANEOUS_TRADES", "2"))
-MIN_RR: float = 1.0  # Mode TEST TOTAL : Pas de barrière de ratio
+MIN_RR: float = 1.3  # Relevé à 1.3
+MAX_SPREAD_POINTS: int = 40  # GARDE-FOU SPREAD : 40 points max
+NEWS_BLOCK_WINDOW: int = 20  # GARDE-FOU NEWS : ±20 min autour des news majoritairement impactantes
 
 # ──────────────────────────────────────────────
 # Risque Dynamique (Nouveau)

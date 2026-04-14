@@ -64,7 +64,8 @@ def setup_logger(name: str, log_file: str, level=logging.INFO) -> logging.Logger
     return logger
 
 
-# Loggers globaux
+# État global pour l'arrêt propre
+SHUTDOWN_MODE: bool = False
 bot_log = setup_logger("bot", config.LOG_BOT)
 trades_log = setup_logger("trades", config.LOG_TRADES)
 
@@ -576,24 +577,95 @@ def are_timeframes_aligned(data: dict) -> bool:
         return False
 
 
+def is_news_window() -> tuple[bool, str]:
+    """
+    GARDE-FOU NEWS : Vérifie si on est dans une fenêtre de publication majeure (±20 min).
+    """
+    try:
+        news_file = "news.json"
+        if not os.path.exists(news_file):
+            return False, ""
+        
+        with open(news_file, "r") as f:
+            news_data = json.load(f)
+        
+        now = datetime.datetime.now()
+        for event in news_data.get("major_events", []):
+            try:
+                event_time = datetime.datetime.strptime(event["time"], "%Y-%m-%d %H:%M")
+                diff = abs((now - event_time).total_seconds()) / 60
+                if diff <= config.NEWS_BLOCK_WINDOW:
+                    return True, event["name"]
+            except:
+                continue
+        return False, ""
+    except Exception as e:
+        bot_log.error("Erreur filtre news : %s", e)
+        return False, ""
+
+
+def get_trend_direction(data: dict) -> str:
+    """
+    GARDE-FOU TREND : Vérifie l'alignement EMA20 > EMA50 sur H1 ET H4.
+    """
+    try:
+        # H1
+        h1_ema20 = data["H1"]["ind"]["ema20"]
+        h1_ema50 = data["H1"]["ind"]["ema50"]
+        # H4
+        h4_ema20 = data["H4"]["ind"]["ema20"]
+        h4_ema50 = data["H4"]["ind"]["ema50"]
+        
+        if h1_ema20 > h1_ema50 and h4_ema20 > h4_ema50:
+            return "BUY"
+        elif h1_ema20 < h1_ema50 and h4_ema20 < h4_ema50:
+            return "SELL"
+        else:
+            return "RANGE"
+    except:
+        return "UNKNOWN"
+
+
 def pre_ia_filter(data: dict) -> tuple[bool, str]:
     """
-    Applique UNIQUEMENT les filtres vitaux (M15).
-    Libéré pour phase de test intensive.
+    Filtre calibré (PRO) — avant appel à DeepSeek.
     """
-    # 1. Session active (0-24h configuré)
+    now_str = datetime.datetime.now().strftime("%H:%M")
+    
+    # 1. Session active
     if not is_active_session():
-        return False, "Session OFF"
+        return False, f"SKIP: Session OFF | Heure={now_str}"
 
-    # 2. Trades simultanés
-    if get_open_trades_count() >= config.MAX_SIMULTANEOUS_TRADES:
-        return False, "Max trades"
+    # 2. Sécurités vitale (Trades / DD)
+    open_trades = get_open_trades_count()
+    if open_trades >= config.MAX_SIMULTANEOUS_TRADES:
+        return False, f"SKIP: Max trades ({open_trades}) | Heure={now_str}"
+    
+    dd = get_daily_drawdown_pct()
+    if dd >= config.MAX_DAILY_DRAWDOWN:
+        return False, f"SKIP: Max DD ({dd:.2f}%) | Heure={now_str}"
 
-    # 3. Drawdown journalier
-    if get_daily_drawdown_pct() >= config.MAX_DAILY_DRAWDOWN:
-        return False, "Max DD"
+    # 3. GARDE-FOU SPREAD (Avant IA)
+    tick = mt5.symbol_info_tick(config.MT5_SYMBOL)
+    if tick:
+        spread = (tick.ask - tick.bid) / mt5.symbol_info(config.MT5_SYMBOL).point
+        if spread > config.MAX_SPREAD_POINTS:
+            bot_log.info("SKIP: spread élevé | Spread=%d | Heure=%s", spread, now_str)
+            return False, f"SKIP: spread élevé ({spread} > {config.MAX_SPREAD_POINTS})"
+    else:
+        spread = 0
 
-    # TOUT LE RESTE EST DÉSACTIVÉ (News, Spread, ATR, Alignement)
+    # 4. GARDE-FOU NEWS (±20 min)
+    is_news, event_name = is_news_window()
+    if is_news:
+        bot_log.info("SKIP: fenêtre news [%s] | Heure=%s", event_name, now_str)
+        return False, f"SKIP: fenêtre news [{event_name}]"
+
+    # 5. GARDE-FOU TREND (H1/H4)
+    trend = get_trend_direction(data)
+    bot_log.info("Analyse Trend: %s | Spread=%d | Heure=%s", trend, spread, now_str)
+    
+    # On laisse passer vers l'IA, mais elle recevra le biais du trend
     return True, ""
 
 
@@ -807,42 +879,49 @@ def calculate_lot_size(balance: float, sl_pips: float, confidence: int = 85, ris
 
 
 def validate_signal(signal: dict, balance: float, current_price: float, 
-                    min_conf: int = None, max_risk: float = None) -> tuple[bool, dict, str]:
+                    min_conf: int = None, max_risk: float = None, market_data: dict = None) -> tuple[bool, dict, str]:
     """
-    Applique tous les garde-fous risque sur le signal DeepSeek.
-    Supporte les overrides dynamiques min_conf et max_risk.
+    Applique tous les garde-fous calibrés (PRO) sur le signal DeepSeek.
     """
     try:
+        now_str = datetime.datetime.now().strftime("%H:%M")
         if signal["DIR"] == "HOLD":
             return False, signal, "Direction HOLD : aucun trade"
 
-        # Confiance minimale (dynamique depuis Telegram ou config par défaut)
+        # 1. Confiance minimale (Garde-fou #1)
         effective_min_conf = min_conf if min_conf is not None else config.MIN_CONFIDENCE
-        bot_log.info("Validation Signal : Seuil de confiance appliqué = %d%%", effective_min_conf)
-        
         if signal["CONF"] < effective_min_conf:
-            return False, signal, f"Confiance insuffisante ({signal['CONF']}% < {effective_min_conf}%)"
+            return False, signal, f"SKIP Confiance faible | {signal['CONF']}% < {effective_min_conf}% | Heure={now_str}"
 
-        # Ratio risque/rendement (Désactivé pour donner la main à l'IA)
-        # if signal["RR"] < config.MIN_RR:
-        #    return False, signal, f"RR insuffisant ({signal['RR']} < {config.MIN_RR})"
+        # 2. Ratio risque/rendement (Garde-fou #1)
+        if signal["RR"] < config.MIN_RR:
+            return False, signal, f"SKIP RR insuffisant | {signal['RR']} < {config.MIN_RR} | Heure={now_str}"
 
-        # Cohérence SL/TP avec la direction
+        # 3. GARDE-FOU TREND (H1/H4 EMA20/50)
+        if market_data:
+            trend = get_trend_direction(market_data)
+            if signal["DIR"] == "BUY" and trend == "SELL":
+                return False, signal, f"SKIP Trend opposé | Signal=BUY vs Trend=SELL | Heure={now_str}"
+            if signal["DIR"] == "SELL" and trend == "BUY":
+                return False, signal, f"SKIP Trend opposé | Signal=SELL vs Trend=BUY | Heure={now_str}"
+            if trend == "RANGE":
+                # On peut choisir de bloquer ou laisser passer, ic on reste prudent
+                bot_log.info("Note: Trend en RANGE sur H1/H4")
+
+        # 4. Cohérence SL/TP
         if signal["DIR"] == "BUY":
             if signal["SL"] >= current_price:
-                return False, signal, f"SL={signal['SL']} >= prix={current_price} pour BUY"
+                return False, signal, f"SL={signal['SL']} >= prix={current_price}"
             if signal["TP"] <= current_price:
-                return False, signal, f"TP={signal['TP']} <= prix={current_price} pour BUY"
+                return False, signal, f"TP={signal['TP']} <= prix={current_price}"
         elif signal["DIR"] == "SELL":
             if signal["SL"] <= current_price:
-                return False, signal, f"SL={signal['SL']} <= prix={current_price} pour SELL"
+                return False, signal, f"SL={signal['SL']} <= prix={current_price}"
             if signal["TP"] >= current_price:
-                return False, signal, f"TP={signal['TP']} >= prix={current_price} pour SELL"
+                return False, signal, f"TP={signal['TP']} >= prix={current_price}"
 
-        # Recalcul du lot selon le risque réel (dynamique)
+        # 5. Calcul Lot & Sizing
         sl_pips = abs(current_price - signal["SL"])
-        
-        # Override dynamique du risque max si présent
         effective_risk = max_risk if max_risk is not None else config.MAX_RISK_PCT
         
         # M4 — Sécurité fallback : réduction de 50% du risque
@@ -850,21 +929,16 @@ def validate_signal(signal: dict, balance: float, current_price: float,
             effective_risk *= 0.5
             
         max_lot = calculate_lot_size(balance, sl_pips, confidence=signal["CONF"], risk_override=effective_risk)
+        signal["LOT"] = max_lot
 
-
-
-        if signal["LOT"] > max_lot:
-            bot_log.warning(
-                "LOT IA (%s) > max calculé (%s), recalibrage.", signal["LOT"], max_lot
-            )
-            signal["LOT"] = max_lot
-
-        # Drawdown en temps réel
-        dd = get_daily_drawdown_pct()
-        if dd >= config.MAX_DAILY_DRAWDOWN:
-            return False, signal, f"Drawdown journalier atteint ({dd:.2f}%)"
-
+        # Log de validation finale
+        bot_log.info("VALIDÉ | %s | Conf=%d%% | RR=%.1f | Lot=%.2f | Heure=%s", 
+                     signal["DIR"], signal["CONF"], signal["RR"], max_lot, now_str)
+        
         return True, signal, ""
+    except Exception as exc:
+        bot_log.error("Exception validate_signal : %s", exc)
+        return False, signal, str(exc)
     except Exception as exc:
         bot_log.error("Exception validate_signal : %s", exc)
         return False, signal, str(exc)

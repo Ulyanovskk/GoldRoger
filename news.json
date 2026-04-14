@@ -1,0 +1,9 @@
+{
+    "major_events": [
+        {"name": "NFP / Employment", "time": "2026-05-01 13:30", "recurring": "monthly_1st_friday"},
+        {"name": "CPI Inflation", "time": "2026-04-10 13:30", "recurring": "fixed_date_monthly_10"},
+        {"name": "FOMC Meeting", "time": "2026-05-01 19:00", "recurring": "wednesday_periodic"},
+        {"name": "ISM Manufacturing", "time": "2026-04-01 15:00", "recurring": "fixed_day_1"}
+    ],
+    "manual_blocks": []
+}
