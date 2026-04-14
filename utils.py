@@ -816,10 +816,12 @@ def validate_signal(signal: dict, balance: float, current_price: float,
         if signal["DIR"] == "HOLD":
             return False, signal, "Direction HOLD : aucun trade"
 
-        # Confiance minimale (dynamique ou config)
+        # Confiance minimale (dynamique depuis Telegram ou config par défaut)
         effective_min_conf = min_conf if min_conf is not None else config.MIN_CONFIDENCE
+        bot_log.info("Validation Signal : Seuil de confiance appliqué = %d%%", effective_min_conf)
+        
         if signal["CONF"] < effective_min_conf:
-            return False, signal, f"Confiance insuffisante ({signal['CONF']} < {effective_min_conf})"
+            return False, signal, f"Confiance insuffisante ({signal['CONF']}% < {effective_min_conf}%)"
 
         # Ratio risque/rendement
         if signal["RR"] < config.MIN_RR:
