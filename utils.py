@@ -840,12 +840,23 @@ async def check_proactive_alerts(state_obj) -> None:
 
 class AISignal(BaseModel):
     DIR: Literal["BUY", "SELL", "HOLD"]
-    LOT: float = Field(ge=0.0, le=10.0) # Accept 0.0, will be filtered in validate_signal
+    LOT: float = Field(ge=0.0, le=10.0)  # Accept 0.0, recalibré dans validate_signal
     TP: float
     SL: float
     CONF: int = Field(ge=0, le=100)
     RR: float
-    REASON: str = Field(max_length=100) # max 5 words est une consigne prompt
+    REASON: str  # Tronqué à 100 chars par le validator ci-dessous
+
+    @field_validator("REASON", mode="before")
+    @classmethod
+    def truncate_reason(cls, v: str) -> str:
+        """Tronque silencieusement REASON à 100 chars au lieu de rejeter le signal."""
+        if isinstance(v, str) and len(v) > 100:
+            bot_log.warning(
+                "REASON tronqué (%d→100 chars) : %s…", len(v), v[:60]
+            )
+            return v[:100]
+        return v
 
 async def call_deepseek(compressed_data: str, state_obj=None) -> Optional[dict]:
     """
