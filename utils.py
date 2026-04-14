@@ -795,12 +795,12 @@ def calculate_lot_size(balance: float, sl_pips: float, confidence: int = 85, ris
         # Valeur du risque par point pour 1 lot
         point_value = symbol_info.trade_tick_value / symbol_info.trade_tick_size
         lot = risk_usd / (sl_pips * point_value)
-        lot = round(lot, 2)
+        lot = max(0.01, round(lot, 2))
         
         # Log du risque appliqué
         bot_log.info("Risque calculé : %.2f%% (Conf=%d) -> Lot: %.2f", risk_pct, confidence, lot)
         
-        return max(0.01, min(lot, 10.0))
+        return min(lot, 10.0)
     except Exception as exc:
         bot_log.error("Exception calculate_lot_size : %s", exc)
         return 0.01
@@ -915,7 +915,7 @@ def execute_trade(signal: dict) -> Optional[dict]:
             "tp":            signal["TP"],
             "deviation":     deviation,
             "magic":         config.MT5_MAGIC,
-            "comment":       f"GB|{signal['REASON']}|{signal['CONF']}"[:30],
+            "comment":       f"GB-{signal['CONF']}",
             "type_time":     mt5.ORDER_TIME_GTC,
             "type_filling":  mt5.ORDER_FILLING_IOC,
         }
