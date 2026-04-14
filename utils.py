@@ -290,8 +290,8 @@ def find_support_resistance(df: pd.DataFrame, n_levels: int = 2) -> tuple[list, 
         current_price = df["Close"].iloc[-1]
 
         # Conserver les résistances au-dessus du prix et les supports en dessous
-        r_levels = [r for r in cluster(resistances) if r > current_price]
-        s_levels = [s for s in cluster(supports)    if s < current_price]
+        r_levels = [float(r) for r in cluster(resistances) if r > current_price]
+        s_levels = [float(s) for s in cluster(supports)    if s < current_price]
 
         return (
             s_levels[-n_levels:] if s_levels else [],
@@ -385,6 +385,10 @@ def is_high_impact_news() -> tuple[bool, str]:
         start = now - datetime.timedelta(minutes=config.NEWS_CHECK_WINDOW_MINS)
         end = now + datetime.timedelta(minutes=config.NEWS_CHECK_WINDOW_MINS)
         
+        # Vérification si la fonction existe dans cette version de la lib MT5
+        if not hasattr(mt5, 'calendar_get'):
+            return False, ""
+
         # Récupération des événements du calendrier MT5
         events = mt5.calendar_get(time_from=int(start.timestamp()), time_to=int(end.timestamp()))
         if events:
@@ -400,6 +404,9 @@ def is_high_impact_news() -> tuple[bool, str]:
 def fetch_market_news() -> str:
     """Récupère les prochains événements économiques majeurs via MT5 (USD/XAU)."""
     try:
+        if not hasattr(mt5, 'calendar_get'):
+            return "news:N/A"
+
         now = datetime.datetime.now(datetime.timezone.utc)
         # On regarde les prochaines 24 heures
         end = now + datetime.timedelta(hours=24)
@@ -641,7 +648,7 @@ async def check_proactive_alerts(state_obj) -> None:
 
 class AISignal(BaseModel):
     DIR: Literal["BUY", "SELL", "HOLD"]
-    LOT: float = Field(ge=0.01, le=10.0)
+    LOT: float = Field(ge=0.0, le=10.0) # Accept 0.0, will be filtered in validate_signal
     TP: float
     SL: float
     CONF: int = Field(ge=0, le=100)
