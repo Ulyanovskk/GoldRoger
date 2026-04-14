@@ -533,26 +533,29 @@ def is_active_session() -> bool:
 
 def are_timeframes_aligned(data: dict) -> bool:
     """
-    Vérifie si H1 et H4 pointent dans la même direction générale (tendance de fond).
-    Condition principale : H1 et H4 ont le même ema_trend (bull ou bear).
-    Le M15 peut être en correction/respiration sans bloquer le bot.
-    Un bonus est accordé si M15 est également aligné (loggé).
+    Vérifie si H1 affiche une tendance directionnelle claire (bull ou bear).
+    H4 est lu et loggé à titre informatif mais n'est plus une condition bloquante.
+    Le M15 peut être en correction sans bloquer le bot.
     """
     try:
         h1_trend  = data["H1"]["ind"]["ema_trend"]
-        h4_trend  = data["H4"]["ind"]["ema_trend"]
+        h4_trend  = data["H4"]["ind"]["ema_trend"]   # Informatif uniquement
         m15_trend = data["M15"]["ind"]["ema_trend"]
 
-        if h1_trend == h4_trend and h1_trend in ("bull", "bear"):
-            if m15_trend == h1_trend:
-                bot_log.debug("Timeframes parfaitement alignés (M15+H1+H4 = %s)", h1_trend)
-            else:
-                bot_log.debug(
-                    "Alignement partiel : H1+H4 = %s | M15 = %s (respiration tolérée)",
-                    h1_trend, m15_trend
-                )
-            return True
-        return False
+        # Seul H1 est bloquant : il doit être bull ou bear (pas mix)
+        if h1_trend not in ("bull", "bear"):
+            bot_log.debug(
+                "Alignement refusé : H1=%s (indirectionnel) | H4=%s (info) | M15=%s",
+                h1_trend, h4_trend, m15_trend
+            )
+            return False
+
+        # H1 est directionnel : on passe, on logue H4 pour information
+        bot_log.debug(
+            "Alignement validé : H1=%s (actif) | H4=%s (info, non-bloquant) | M15=%s",
+            h1_trend, h4_trend, m15_trend
+        )
+        return True
     except Exception as exc:
         bot_log.error("Exception are_timeframes_aligned : %s", exc)
         return False

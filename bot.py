@@ -274,7 +274,14 @@ async def monitoring_loop() -> None:
                     ticket = res["ticket"]
                     open_time = state.open_trade_times.pop(ticket, None)
                     duration = int((datetime.datetime.now() - open_time).total_seconds() / 60) if open_time else 0
-                    _trade_log = {"dir": res["dir"], "lot": 0, "sl": 0, "tp": 0, "conf": 0}
+                    # Bugfix : utilisation des vraies valeurs de la position fermée
+                    _trade_log = {
+                        "dir":  res.get("dir", ""),
+                        "lot":  res.get("lot", 0),
+                        "sl":   res.get("sl", 0),
+                        "tp":   res.get("tp", 0),
+                        "conf": res.get("conf", 0),
+                    }
                     _src = "deepseek"
                     asyncio.ensure_future(
                         asyncio.to_thread(

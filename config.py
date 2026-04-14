@@ -58,9 +58,9 @@ CANDLES_COUNT: int = 300  # Min 200+100 buffer pour l'EMA 200 — ne pas descend
 # ──────────────────────────────────────────────
 RISK_PERCENT: float = 1.5
 MAX_DAILY_DRAWDOWN: float = 3.0
-MIN_CONFIDENCE: int = int(os.getenv("MIN_CONFIDENCE", "85"))
+MIN_CONFIDENCE: int = int(os.getenv("MIN_CONFIDENCE", "75"))  # Abaissé (test) : 85 → 75
 MAX_SIMULTANEOUS_TRADES: int = int(os.getenv("MAX_SIMULTANEOUS_TRADES", "2"))
-MIN_RR: float = 2.0  # Ratio risque/rendement minimum accepté (X2 gain vs risque)
+MIN_RR: float = 1.5  # Abaissé (test) : 2.0 → 1.5 pour plus d'opportunités
 
 # ──────────────────────────────────────────────
 # Risque Dynamique (Nouveau)
@@ -81,7 +81,7 @@ ATR_MAX_THRESHOLD: float = 15.0
 # ──────────────────────────────────────────────
 MAX_SPREAD_POINTS: int = 50       # 5.0 pips (évite la nuit et les news)
 BLOCK_NEWS_IMPORTANCE: int = 3    # 3 = Haute importance (NFP, CPI, Fed)
-NEWS_CHECK_WINDOW_MINS: int = 60  # Bloque 1h avant/après une news majeure
+NEWS_CHECK_WINDOW_MINS: int = 30  # Abaissé (test) : 60 → 30 min avant/après une news majeure
 
 # ──────────────────────────────────────────────
 # Gestion Active des Positions (Nouveau)
