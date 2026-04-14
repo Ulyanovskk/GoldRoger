@@ -41,7 +41,7 @@ class BotState:
     STOPPED = "stoppé"
 
     def __init__(self) -> None:
-        self.status: str = self.STOPPED
+        self.status: str = self.ACTIVE  # Mode AUTONOME : démarre actif par défaut
         # Statistiques journalières
         self.trades_today:   int   = 0
         self.profit_today:   float = 0.0
