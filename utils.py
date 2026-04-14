@@ -229,10 +229,10 @@ def compute_indicators(df: pd.DataFrame) -> dict:
         else:
             bb_pos = "mid"
 
-        # Tendance EMA
-        if last_close > last_ema20 > last_ema50 > last_ema200:
+        # Tendance EMA (Simplifiée pour maximiser les tests)
+        if last_close > last_ema200:
             ema_trend = "bull"
-        elif last_close < last_ema20 < last_ema50 < last_ema200:
+        elif last_close < last_ema200:
             ema_trend = "bear"
         else:
             ema_trend = "mix"

@@ -61,9 +61,9 @@ CANDLES_COUNT: int = 300  # Min 200+100 buffer pour l'EMA 200 — ne pas descend
 # ──────────────────────────────────────────────
 RISK_PERCENT: float = 1.5
 MAX_DAILY_DRAWDOWN: float = 3.0
-MIN_CONFIDENCE: int = int(os.getenv("MIN_CONFIDENCE", "75"))  # Abaissé (test) : 85 → 75
+MIN_CONFIDENCE: int = int(os.getenv("MIN_CONFIDENCE", "65"))  # Abaissé agressivement : 75 → 65
 MAX_SIMULTANEOUS_TRADES: int = int(os.getenv("MAX_SIMULTANEOUS_TRADES", "2"))
-MIN_RR: float = 1.5  # Abaissé (test) : 2.0 → 1.5 pour plus d'opportunités
+MIN_RR: float = 1.2  # Abaissé agressivement : 1.5 → 1.2 pour capturer plus de flux
 
 # ──────────────────────────────────────────────
 # Risque Dynamique (Nouveau)
@@ -105,8 +105,9 @@ DAILY_SUMMARY_HOUR: int = 23     # Heure d'envoi du résumé Telegram
 # Sessions de trading actives (UTC)
 # ──────────────────────────────────────────────
 ACTIVE_SESSIONS: dict = {
-    "London":   {"start": 7,  "end": 16},   # 07h00 – 16h00 UTC
-    "New York": {"start": 12, "end": 21},   # 12h00 – 21h00 UTC
+    "London":   {"start": 7,  "end": 16},
+    "New York": {"start": 12, "end": 21},
+    "Asia/Test": {"start": 0,  "end": 24},   # Ouvert 24h/24 pour phase de test
 }
 
 # ──────────────────────────────────────────────
