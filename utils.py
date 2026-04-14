@@ -619,8 +619,8 @@ async def check_proactive_alerts(state_obj) -> None:
             )
             bot_log.warning("Pause préventive : win rate %.0f%%", win_rate)
 
-    # 2. Latence IA > 3s
-    if state_obj.last_ia_latency_s > 3.0:
+    # 2. Latence IA > 10s (3s était trop sensible pour DeepSeek)
+    if state_obj.last_ia_latency_s > 10.0:
         send_telegram(f"⏱ <b>IA lente : {state_obj.last_ia_latency_s}s</b>")
         bot_log.warning("Latence IA élevée : %.2fs", state_obj.last_ia_latency_s)
         state_obj.last_ia_latency_s = 0.0  # Reset pour éviter spam
