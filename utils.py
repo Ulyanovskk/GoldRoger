@@ -823,9 +823,9 @@ def validate_signal(signal: dict, balance: float, current_price: float,
         if signal["CONF"] < effective_min_conf:
             return False, signal, f"Confiance insuffisante ({signal['CONF']}% < {effective_min_conf}%)"
 
-        # Ratio risque/rendement
-        if signal["RR"] < config.MIN_RR:
-            return False, signal, f"RR insuffisant ({signal['RR']} < {config.MIN_RR})"
+        # Ratio risque/rendement (Désactivé pour donner la main à l'IA)
+        # if signal["RR"] < config.MIN_RR:
+        #    return False, signal, f"RR insuffisant ({signal['RR']} < {config.MIN_RR})"
 
         # Cohérence SL/TP avec la direction
         if signal["DIR"] == "BUY":
