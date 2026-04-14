@@ -429,12 +429,20 @@ def compress_data(data: dict, context: dict = None) -> str:
     try:
         parts = []
         
-        # M5 — Head context
+        # M5 — Head context + Niveau 2 : biais adaptatif par direction
         if context:
-            l3 = "".join(["W" if t['pnl'] > 0 else "L" for t in context.get('last_trades', [])])
+            trades = context.get('last_trades', [])
+            l3 = "".join(["W" if t['pnl'] > 0 else "L" for t in trades])
             wb = context.get('week_bias', 'NEUT')[:4]
             sr = context.get('persistent_sr', [])
-            parts.append(f"CTX:L3={l3 or 'None'},WB={wb},SR={sr}")
+
+            # Calcul du win rate par direction sur les trades récents
+            buy_trades  = [t for t in trades if str(t.get('dir', '')).upper() == 'BUY']
+            sell_trades = [t for t in trades if str(t.get('dir', '')).upper() == 'SELL']
+            buy_wr  = round(sum(1 for t in buy_trades  if t.get('pnl', 0) > 0) / len(buy_trades)  * 100) if buy_trades  else 50
+            sell_wr = round(sum(1 for t in sell_trades if t.get('pnl', 0) > 0) / len(sell_trades) * 100) if sell_trades else 50
+
+            parts.append(f"CTX:L3={l3 or 'None'},WB={wb},SR={sr},BUY_wr={buy_wr}%,SELL_wr={sell_wr}%")
 
         parts.append("XAU")
 

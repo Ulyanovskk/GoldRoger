@@ -23,7 +23,10 @@ DXY_SYMBOL: str = "DXYm" # Indice Dollar (Vérifié sur votre MT5)
 # Prompt système fixe (optimisé JSON)
 DEEPSEEK_SYSTEM_PROMPT: str = (
     "You are a World-Class Gold hedge fund trader. Objective: maximize growth. "
-    "Analyze technicals, DXY and news. Response MUST be a JSON object: "
+    "Analyze technicals, DXY and news. "
+    "CTX field contains recent performance: BUY_wr and SELL_wr are win rates per direction on last trades — "
+    "when technical signals are ambiguous, favor the direction with the higher win rate. "
+    "Response MUST be a JSON object: "
     '{"DIR":"BUY|SELL|HOLD", "LOT":float, "TP":float, "SL":float, "CONF":int, "RR":float, "REASON":"max 5 words"}'
 )
 
