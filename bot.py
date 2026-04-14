@@ -480,7 +480,8 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     connected_str = "✅ Connecté" if mt5.account_info() else "❌ Déconnecté"
 
     open_count = utils.get_open_trades_count()
-    dd = utils.get_daily_drawdown_pct()
+    # Guard : start_balance passé pour DD exact — 0.0 retourne 0.0 sans faux arrêt
+    dd = utils.get_daily_drawdown_pct(start_balance=state.start_balance)
 
     msg = (
         f"📊 <b>STATUT GOLDBOT</b>\n"
@@ -506,7 +507,8 @@ async def cmd_balance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.message.reply_text("❌ MT5 non connecté.")
         return
 
-    dd = utils.get_daily_drawdown_pct()
+    # Guard : start_balance passé pour DD exact — 0.0 retourne 0.0 sans faux arrêt
+    dd = utils.get_daily_drawdown_pct(start_balance=state.start_balance)
     msg = (
         f"💰 <b>BALANCE</b>\n"
         f"Balance  : {account.balance:.2f} USD\n"
