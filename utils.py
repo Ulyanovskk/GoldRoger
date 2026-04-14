@@ -601,9 +601,12 @@ def pre_ia_filter(data: dict) -> tuple[bool, str]:
 
     # FILTRES DE SÉCURITÉ SUPPLÉMENTAIRES (Or)
     # 1. Spread
+    symbol_info = mt5.symbol_info(config.MT5_SYMBOL)
     tick = mt5.symbol_info_tick(config.MT5_SYMBOL)
-    if tick and tick.spread > config.MAX_SPREAD_POINTS:
-        return False, f"Spread trop élevé ({tick.spread} pts)"
+    if tick and symbol_info:
+        current_spread = int(round((tick.ask - tick.bid) / symbol_info.point))
+        if current_spread > config.MAX_SPREAD_POINTS:
+            return False, f"Spread trop élevé ({current_spread} pts)"
 
     # 2. Calendrier Économique
     is_news, news_name = is_high_impact_news()
@@ -658,9 +661,12 @@ async def check_proactive_alerts(state_obj) -> None:
 
     # 4. Spread anormal (déjà dans pre_ia_filter — log seul ici si hors session)
     try:
+        symbol_info = mt5.symbol_info(config.MT5_SYMBOL)
         tick = mt5.symbol_info_tick(config.MT5_SYMBOL)
-        if tick and tick.spread > config.MAX_SPREAD_POINTS * 2:
-            send_telegram(f"📊 <b>Spread anormal détecté : {tick.spread} pts.</b> Trade ignoré.")
+        if tick and symbol_info:
+            current_spread = int(round((tick.ask - tick.bid) / symbol_info.point))
+            if current_spread > config.MAX_SPREAD_POINTS * 2:
+                send_telegram(f"📊 <b>Spread anormal détecté : {current_spread} pts.</b> Trade ignoré.")
     except Exception:
         pass
 
