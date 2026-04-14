@@ -59,7 +59,7 @@ CANDLES_COUNT: int = 300  # Min 200+100 buffer pour l'EMA 200 — ne pas descend
 # Gestion du risque (STRICTE 1.5%)
 # ──────────────────────────────────────────────
 RISK_PERCENT: float = 1.5
-MAX_DAILY_DRAWDOWN: float = 3.0
+MAX_DAILY_DRAWDOWN: float = 15.0  # Augmenté à 15% pour les petits comptes (tests)
 MIN_CONFIDENCE: int = int(os.getenv("MIN_CONFIDENCE", "60"))  # Ajusté à 60% pour équilibrer tests et qualité
 MAX_SIMULTANEOUS_TRADES: int = int(os.getenv("MAX_SIMULTANEOUS_TRADES", "2"))
 MIN_RR: float = 1.0  # Mode TEST TOTAL : Pas de barrière de ratio

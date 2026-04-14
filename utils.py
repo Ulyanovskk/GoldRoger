@@ -1179,31 +1179,45 @@ def _fetch_trade_result(ticket: int) -> Optional[dict]:
     """Récupère le profit et les pips d'une position fermée depuis l'historique."""
     try:
         import MetaTrader5 as mt5
-        # On définit une fenêtre de temps large pour l'historique (dernières 24h)
+        # Fenêtre de 24h pour récupérer l'historique de la position
         from_date = datetime.datetime.now() - datetime.timedelta(days=1)
         deals = mt5.history_deals_get(from_date, datetime.datetime.now(), position=ticket)
         
         if deals is None or len(deals) < 2:
             return None
         
-        # Le deal d'entrée est le premier, le deal de sortie est le dernier
-        # On calcule le profit total cumulé des deals pour cette position
-        total_profit = sum(d.profit + d.commission + d.swap for d in deals)
-        
-        # Calcul des pips (différence entre deal d'entrée et de sortie)
+        # Identification deal entrée/sortie
         entry_deal = [d for d in deals if d.entry == mt5.DEAL_ENTRY_IN][0]
         exit_deal = [d for d in deals if d.entry == mt5.DEAL_ENTRY_OUT][0]
         
-        diff = abs(entry_deal.price - exit_deal.price)
-        pips = diff 
+        symbol_info = mt5.symbol_info(entry_deal.symbol)
+        point = symbol_info.point if symbol_info else 0.01
+
+        # Profit réel (Profit + Commission + Swap)
+        total_profit = sum(d.profit + d.commission + d.swap for d in deals)
         
-        # M5 context data
+        # Calcul des pips selon la direction
+        if entry_deal.type == mt5.ORDER_TYPE_BUY:
+            pips = (exit_deal.price - entry_deal.price) / point
+        else:
+            pips = (entry_deal.price - exit_deal.price) / point
+        
+        # Calcul du % réel de gain/perte sur la balance
+        acc = mt5.account_info()
+        balance = acc.balance if acc else 100.0
+        pnl_pct = (total_profit / balance) * 100 if balance > 0 else 0.0
+
         return {
             "ticket": ticket,
-            "profit": total_profit, 
-            "pips": pips,
+            "profit": round(float(total_profit), 2),
+            "pips": round(float(pips), 1),
             "dir": "BUY" if entry_deal.type == mt5.ORDER_TYPE_BUY else "SELL",
-            "pnl_pct": (total_profit / entry_deal.volume / entry_deal.price) * 100 # Approx
+            "pnl_pct": round(float(pnl_pct), 2),
+            "entry": float(entry_deal.price),
+            "exit": float(exit_deal.price),
+            "lot": float(entry_deal.volume),
+            "sl": float(entry_deal.sl) if hasattr(entry_deal, 'sl') else 0,
+            "tp": float(entry_deal.tp) if hasattr(entry_deal, 'tp') else 0
         }
     except Exception as exc:
         bot_log.error("Exception _fetch_trade_result pour ticket #%d : %s", ticket, exc)
