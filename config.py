@@ -50,11 +50,13 @@ DEEPSEEK_SYSTEM_PROMPT: str = (
     "SLOPE_H1=EMA20 slope on H1 (UP/DOWN/FLAT), "
     "CH_POS=price position in channel (TOP/MID/BOTTOM). "
 
-    "PRIORITY RULE: "  # PRICE-STRUCTURE
-    "If STRUCT=DOWNTREND and CH_POS=TOP → SELL is favored. "
-    "If STRUCT=UPTREND and CH_POS=BOTTOM → BUY is favored. "
-    "If STRUCT=RANGE → require stronger indicator alignment "
-    "before acting, CONF must be 70+ to trade a range. "
+    "PRIORITY RULE: "  # PRICE-STRUCTURE — corrigé pour éviter HOLD excessif
+    "If STRUCT=DOWNTREND and CH_POS=TOP → SELL is strongly favored. "
+    "If STRUCT=DOWNTREND and CH_POS=MID → SELL is moderately favored, check RSI. "
+    "If STRUCT=DOWNTREND and CH_POS=BOTTOM → neutral, wait for bounce or breakdown. "
+    "If STRUCT=UPTREND and CH_POS=BOTTOM → BUY is strongly favored. "
+    "If STRUCT=UPTREND and CH_POS=MID → BUY is moderately favored, check RSI. "
+    "If STRUCT=RANGE → require stronger alignment, prefer CONF 65+ to act. "
 
     "Response MUST be strict JSON only, no extra text: "
     '{"DIR":"BUY|SELL|HOLD", "LOT":0.0, "TP":float, '

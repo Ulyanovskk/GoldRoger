@@ -475,25 +475,34 @@ def fetch_market_news() -> str:
 def detect_price_structure(df: pd.DataFrame) -> str:
     """
     # PRICE-STRUCTURE — Détecte la structure de prix sur les 10 dernières bougies.
-    Lower Highs + Lower Lows = DOWNTREND
-    Higher Highs + Higher Lows = UPTREND
+    Utilise un vote majoritaire (≥70% des bougies) au lieu du strict-all —
+    sinon un seul doji/consolidation brise toute la détection et force RANGE.
+
+    Lower Highs + Lower Lows (≥70%) = DOWNTREND
+    Higher Highs + Higher Lows (≥70%) = UPTREND
     Sinon = RANGE
     """
     try:
         highs = df["High"].values[-10:]
         lows  = df["Low"].values[-10:]
+        n     = len(highs) - 1  # nombre de comparaisons
+        if n <= 0:
+            return "RANGE"
 
-        lower_highs  = all(highs[i] > highs[i + 1] for i in range(len(highs) - 1))
-        lower_lows   = all(lows[i]  > lows[i + 1]  for i in range(len(lows)  - 1))
-        higher_highs = all(highs[i] < highs[i + 1] for i in range(len(highs) - 1))
-        higher_lows  = all(lows[i]  < lows[i + 1]  for i in range(len(lows)  - 1))
+        # Compter les paires (au lieu de all())
+        lh_count = sum(1 for i in range(n) if highs[i] > highs[i + 1])  # lower highs
+        ll_count = sum(1 for i in range(n) if lows[i]  > lows[i + 1])   # lower lows
+        hh_count = sum(1 for i in range(n) if highs[i] < highs[i + 1])  # higher highs
+        hl_count = sum(1 for i in range(n) if lows[i]  < lows[i + 1])   # higher lows
 
-        if lower_highs and lower_lows:
-            return "DOWNTREND"   # channel baissier confirmé
-        elif higher_highs and higher_lows:
-            return "UPTREND"     # channel haussier confirmé
+        threshold = 0.70  # 70% des bougies suffisent pour valider la tendance
+
+        if (lh_count / n) >= threshold and (ll_count / n) >= threshold:
+            return "DOWNTREND"   # channel baissier confirmé (≥70% des bougies)
+        elif (hh_count / n) >= threshold and (hl_count / n) >= threshold:
+            return "UPTREND"     # channel haussier confirmé (≥70% des bougies)
         else:
-            return "RANGE"       # pas de structure claire
+            return "RANGE"       # structure mixte
     except Exception as exc:
         bot_log.debug("detect_price_structure : %s", exc)
         return "RANGE"
