@@ -51,16 +51,14 @@ DEEPSEEK_SYSTEM_PROMPT: str = (
     "CH_POS=price position in channel (TOP/MID/BOTTOM). "
 
     "Additional keys: "
-    "STRUCT=price structure (UPTREND/DOWNTREND/RANGE), "
-    "SLOPE_M15/H1=EMA20 slope, CH_POS=position in channel, "
-    "R_SLOPE=RSI acceleration (ACCEL_UP/DOWN/FLAT). "
+    "STRUCT=UPTREND/DOWNTREND/RANGE, LRS=Linear Regression Slope (float), "
+    "SLOPE_M15/H1=EMA slope, CH_POS=channel pos, R_SLOPE=RSI accel. "
 
-    "PRIORITY RULE (DYNAMIC FLOW): "
-    "1. If STRUCT and SLOPE agree (ex: BOTH DOWN/DOWNTREND), PRIORITIZE this flow "
-    "   even if D1 bias is opposite. We trade the M15 momentum. "
-    "2. If R_SLOPE=ACCEL_DOWN and SLOPE_M15=DOWN → High probability of continuation. "
-    "3. If STRUCT=RANGE → only trade if RSI is extreme OR R_SLOPE shows a breakout. "
-    "4. DOWNTREND + CH_POS=BOTTOM is NOT a hold if R_SLOPE=ACCEL_DOWN (breakdown). "
+    "PRIORITY RULE (DYNAMIC REVOLUTION): "
+    "1. LRS is the absolute truth for structure. If LRS < -0.00002 → DOWNTREND is active. "
+    "2. If LRS and SLOPE_M15 agree, TRADE THE FLOW. "
+    "3. Ignore CH_POS=BOTTOM if LRS is negative and R_SLOPE is FLAT/DOWN (Trend continuation). "
+    "4. Ignore LT Bullish bias (D1/H4) if LRS M15 is strongly negative (Scalp/Intraday flow). "
 
     "Response MUST be strict JSON only, no extra text: "
     '{"DIR":"BUY|SELL|HOLD", "LOT":0.0, "TP":float, '

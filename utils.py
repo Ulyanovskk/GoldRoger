@@ -472,35 +472,33 @@ def fetch_market_news() -> str:
 # PRICE-STRUCTURE — Fonctions d'analyse de la structure de prix
 # Appelées depuis compress_data() pour enrichir le contexte envoyé à DeepSeek.
 
-def detect_price_structure(df: pd.DataFrame) -> str:
+def detect_price_structure(df: pd.DataFrame) -> tuple[str, float]:
     """
-    # DYNAMIC-FLOW — Détecte la structure sur 30 bougies (7h30).
-    Vision plus large pour capturer les canaux de tendance.
+    # DYNAMIC-REVOLUTION — Détection par Régression Linéaire.
+    Calcule la pente mathématique sur les 30 dernières bougies.
+    Retourne (Tendance, Pente_Normalisée).
     """
     try:
-        # On regarde plus loin (30 bougies)
-        highs = df["High"].values[-30:]
-        lows  = df["Low"].values[-30:]
-        n     = len(highs) - 1
-        if n <= 0:
-            return "RANGE"
-
-        lh_count = sum(1 for i in range(n) if highs[i] > highs[i + 1])
-        ll_count = sum(1 for i in range(n) if lows[i]  > lows[i + 1])
-        hh_count = sum(1 for i in range(n) if highs[i] < highs[i + 1])
-        hl_count = sum(1 for i in range(n) if lows[i]  < lows[i + 1])
-
-        threshold = 0.65  # Sensibilité augmentée à 65%
-
-        if (lh_count / n) >= threshold and (ll_count / n) >= threshold:
-            return "DOWNTREND"
-        elif (hh_count / n) >= threshold and (hl_count / n) >= threshold:
-            return "UPTREND"
+        y = df["Close"].values[-30:]
+        x = np.arange(len(y))
+        
+        # Calcul de la pente via régression linéaire simple
+        slope, intercept = np.polyfit(x, y, 1)
+        
+        # Normalisation de la pente par rapport au prix (en % ou en pips)
+        # Pour EUR/USD, une pente de 0.00005 par bougie est significative
+        atr = ta.volatility.AverageTrueRange(df["High"], df["Low"], df["Close"]).average_true_range().iloc[-1]
+        threshold = atr * 0.01  # Seuil dynamique basé sur volatilité
+        
+        if slope < -threshold:
+            return "DOWNTREND", slope
+        elif slope > threshold:
+            return "UPTREND", slope
         else:
-            return "RANGE"
+            return "RANGE", slope
     except Exception as exc:
-        bot_log.debug("detect_price_structure : %s", exc)
-        return "RANGE"
+        bot_log.debug("detect_price_structure error : %s", exc)
+        return "RANGE", 0.0
 
 
 def ema_slope(ema_series: pd.Series, atr_value: float) -> str:
@@ -653,8 +651,8 @@ def compress_data(data: dict, context: dict = None) -> str:
             atr_m15   = data["M15"]["ind"]["atr"]
             atr_h1    = data["H1"]["ind"]["atr"]
             
-            # PRICE-STRUCTURE — 1. Structure de prix (Lower Highs/Lows ou Higher)
-            struct = detect_price_structure(df_m15)
+            # DYNAMIC-REVOLUTION — Structure par Pente Régression
+            struct, lrs = detect_price_structure(df_m15)
 
             # PRICE-STRUCTURE — 2. Pente EMA20 (Seuils dynamiques basés sur ATR)
             ema20_m15 = ta.trend.EMAIndicator(df_m15["Close"], window=config.EMA_FAST).ema_indicator()
@@ -670,7 +668,7 @@ def compress_data(data: dict, context: dict = None) -> str:
             r_slope = rsi_slope(rsi_m15)
 
             parts.append(
-                f"STRUCT={struct}|SLOPE_M15={slope_m15}|"
+                f"STRUCT={struct}|LRS={lrs:.6f}|SLOPE_M15={slope_m15}|"
                 f"SLOPE_H1={slope_h1}|CH_POS={ch_pos}|R_SLOPE={r_slope}"
             )
             bot_log.debug(
