@@ -1035,7 +1035,7 @@ async def call_deepseek(compressed_data: str, state_obj=None) -> Optional[dict]:
                             {"role": "user",   "content": compressed_data},
                         ],
                         "temperature": 0.1,
-                        "max_tokens": 150,
+                        "max_tokens": 512,
                         "response_format": {"type": "json_object"}
                     }
                 )
