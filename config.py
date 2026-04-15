@@ -50,13 +50,17 @@ DEEPSEEK_SYSTEM_PROMPT: str = (
     "SLOPE_H1=EMA20 slope on H1 (UP/DOWN/FLAT), "
     "CH_POS=price position in channel (TOP/MID/BOTTOM). "
 
-    "PRIORITY RULE: "  # PRICE-STRUCTURE — corrigé pour éviter HOLD excessif
-    "If STRUCT=DOWNTREND and CH_POS=TOP → SELL is strongly favored. "
-    "If STRUCT=DOWNTREND and CH_POS=MID → SELL is moderately favored, check RSI. "
-    "If STRUCT=DOWNTREND and CH_POS=BOTTOM → neutral, wait for bounce or breakdown. "
-    "If STRUCT=UPTREND and CH_POS=BOTTOM → BUY is strongly favored. "
-    "If STRUCT=UPTREND and CH_POS=MID → BUY is moderately favored, check RSI. "
-    "If STRUCT=RANGE → require stronger alignment, prefer CONF 65+ to act. "
+    "Additional keys: "
+    "STRUCT=price structure (UPTREND/DOWNTREND/RANGE), "
+    "SLOPE_M15/H1=EMA20 slope, CH_POS=position in channel, "
+    "R_SLOPE=RSI acceleration (ACCEL_UP/DOWN/FLAT). "
+
+    "PRIORITY RULE (DYNAMIC FLOW): "
+    "1. If STRUCT and SLOPE agree (ex: BOTH DOWN/DOWNTREND), PRIORITIZE this flow "
+    "   even if D1 bias is opposite. We trade the M15 momentum. "
+    "2. If R_SLOPE=ACCEL_DOWN and SLOPE_M15=DOWN → High probability of continuation. "
+    "3. If STRUCT=RANGE → only trade if RSI is extreme OR R_SLOPE shows a breakout. "
+    "4. DOWNTREND + CH_POS=BOTTOM is NOT a hold if R_SLOPE=ACCEL_DOWN (breakdown). "
 
     "Response MUST be strict JSON only, no extra text: "
     '{"DIR":"BUY|SELL|HOLD", "LOT":0.0, "TP":float, '

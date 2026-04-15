@@ -474,12 +474,13 @@ def fetch_market_news() -> str:
 
 def detect_price_structure(df: pd.DataFrame) -> str:
     """
-    # PRICE-STRUCTURE — Détecte la structure de prix sur les 15 dernières bougies.
-    Utilise un vote majoritaire (≥65% des bougies) pour capter les canaux.
+    # DYNAMIC-FLOW — Détecte la structure sur 30 bougies (7h30).
+    Vision plus large pour capturer les canaux de tendance.
     """
     try:
-        highs = df["High"].values[-15:]
-        lows  = df["Low"].values[-15:]
+        # On regarde plus loin (30 bougies)
+        highs = df["High"].values[-30:]
+        lows  = df["Low"].values[-30:]
         n     = len(highs) - 1
         if n <= 0:
             return "RANGE"
@@ -553,6 +554,16 @@ def channel_position(df: pd.DataFrame, current_price: float) -> str:
     except Exception as exc:
         bot_log.debug("channel_position : %s", exc)
         return "UNKNOWN"
+
+
+def rsi_slope(rsi_series: pd.Series) -> str:
+    """Détecte si la force (RSI) accélère vers le haut ou le bas."""
+    try:
+        vals = rsi_series.dropna().values
+        if len(vals) < 5: return "FLAT"
+        diff = vals[-1] - vals[-5]
+        return "ACCEL_UP" if diff > 5 else "ACCEL_DOWN" if diff < -5 else "FLAT"
+    except: return "FLAT"
 
 
 def compress_data(data: dict, context: dict = None) -> str:
@@ -653,10 +664,14 @@ def compress_data(data: dict, context: dict = None) -> str:
 
             # PRICE-STRUCTURE — 3. Position dans le channel 20 bougies
             ch_pos = channel_position(df_m15, price)
+            
+            # DYNAMIC-FLOW — 4. Accélération RSI
+            rsi_m15 = ta.momentum.RSIIndicator(df_m15["Close"], window=config.RSI_PERIOD).rsi()
+            r_slope = rsi_slope(rsi_m15)
 
             parts.append(
                 f"STRUCT={struct}|SLOPE_M15={slope_m15}|"
-                f"SLOPE_H1={slope_h1}|CH_POS={ch_pos}"
+                f"SLOPE_H1={slope_h1}|CH_POS={ch_pos}|R_SLOPE={r_slope}"
             )
             bot_log.debug(
                 "PRICE-STRUCTURE | struct=%s | slope_m15=%s | slope_h1=%s | ch_pos=%s",
