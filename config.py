@@ -1,6 +1,8 @@
 """
 config.py — Chargement des variables d'environnement et constantes globales.
 Toutes les valeurs sensibles viennent du fichier .env (jamais hardcodées).
+
+# MIGRATION-EURUSD : Migration complète XAU/USD → EUR/USD (2026-04-15)
 """
 
 import os
@@ -17,14 +19,16 @@ DEEPSEEK_URL: str = "https://api.deepseek.com/v1/chat/completions"
 DEEPSEEK_MODEL: str = "deepseek-chat"
 DEEPSEEK_TIMEOUT: int = 30  # secondes
 
-# Corrélation et Sentiment
-DXY_SYMBOL: str = "DXYm" # Indice Dollar (Vérifié sur votre MT5)
+# MIGRATION-EURUSD : DXY retiré comme indicateur principal — corrélation USD Index générale uniquement
+# DXY_SYMBOL n'est plus utilisé activement pour EUR/USD
+DXY_SYMBOL: str = "DXYm"  # Conservé pour compatibilité — non utilisé en mode EUR/USD
 
-# Prompt système fixe (optimisé JSON)
+# MIGRATION-EURUSD : Prompt système mis à jour pour EUR/USD M15
 DEEPSEEK_SYSTEM_PROMPT: str = (
-    "You are a professional Gold trader analyst (XAU/USD). "
+    "You are a professional EUR/USD Forex trader analyst. "
+    "You specialize in M15 technical analysis on EUR/USD. "
     "Your ONLY job is to analyze technical data and return a trading signal. "
-    
+
     "RULES: "
     "1. Only return BUY or SELL if at least 3 independent indicators align. "
     "2. Return HOLD if signals are mixed or contradictory. "
@@ -33,12 +37,13 @@ DEEPSEEK_SYSTEM_PROMPT: str = (
     "   - 70-79: moderate, most indicators agree. "
     "   - 80+: strong, all timeframes and indicators aligned. "
     "4. Never return CONF > 80 during high volatility (ATR spike). "
-    "5. TP and SL must be based on ATR value provided. "
+    "5. TP and SL must be based on ATR value provided (EUR/USD ATR is typically 0.0005-0.002). "
     "6. Do NOT calculate LOT — leave it at 0.0. "
-    
+    "7. Consider general USD Index correlation (not DXY-specific) for directional bias. "
+
     "Data keys: R=RSI, M=MACD, B=Bollinger, "
     "E=EMA trend, A=ATR, Bwr/Swr=BUY/SELL win rates. "
-    
+
     "Response MUST be strict JSON only, no extra text: "
     '{"DIR":"BUY|SELL|HOLD", "LOT":0.0, "TP":float, '
     '"SL":float, "CONF":int, "RR":float, '
@@ -57,7 +62,7 @@ TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID")
 MT5_LOGIN: int = int(os.getenv("MT5_LOGIN")) if os.getenv("MT5_LOGIN") else None
 MT5_PASSWORD: str = os.getenv("MT5_PASSWORD")
 MT5_SERVER: str = os.getenv("MT5_SERVER")
-MT5_SYMBOL: str = "XAUUSDm"
+MT5_SYMBOL: str = "EURUSDm"  # MIGRATION-EURUSD : XAUUSDm → EURUSDm
 MT5_MAGIC: int = 20240115  # Identifiant unique du bot
 
 # Timeframes utilisés pour l'analyse multi-temporelle
@@ -79,7 +84,8 @@ MAX_DAILY_DRAWDOWN: float = float(os.getenv("MAX_DAILY_DRAWDOWN", "10.0"))  # Lu
 MIN_CONFIDENCE: int = int(os.getenv("MIN_CONFIDENCE", "55"))  # Abaissé à 55% pour plus d'activité
 MAX_SIMULTANEOUS_TRADES: int = int(os.getenv("MAX_SIMULTANEOUS_TRADES", "2"))
 MIN_RR: float = 1.3  # Relevé à 1.3
-MAX_SPREAD_POINTS: int = 40  # GARDE-FOU SPREAD : 40 points max
+# MIGRATION-EURUSD : Spread max adapté EUR/USD (très liquide) — 15 pips = 150 points
+MAX_SPREAD_POINTS: int = 150  # GARDE-FOU SPREAD EUR/USD : 15 pips = 150 points (1 pip = 10 points)
 NEWS_BLOCK_WINDOW: int = 20  # GARDE-FOU NEWS : ±20 min autour des news majoritairement impactantes
 
 # ──────────────────────────────────────────────
@@ -90,18 +96,26 @@ MIN_RISK_PCT: float = 0.5   # Risque min pour CONF = MIN_CONFIDENCE
 MAX_RISK_PCT: float = 2.5   # Risque max pour CONF = 100
 
 # ──────────────────────────────────────────────
-# Filtre Volatilité ATR (Nouveau)
+# Filtre Volatilité ATR — MIGRATION-EURUSD
 # ──────────────────────────────────────────────
-# Le bot refuse de trader si l'ATR est hors de ces bornes (exprimé en USD pour Gold)
-ATR_MIN_THRESHOLD: float = 0.50
-ATR_MAX_THRESHOLD: float = 15.0
+# EUR/USD : ATR typique 0.0005 à 0.002 (en unités de prix, pas en USD)
+ATR_MIN_THRESHOLD: float = 0.0003   # MIGRATION-EURUSD : seuil min ATR EUR/USD
+ATR_MAX_THRESHOLD: float = 0.005    # MIGRATION-EURUSD : seuil max ATR EUR/USD
+
+# MIGRATION-EURUSD : Paramètres ATR/SL/TP pour EUR/USD
+ATR_MULTIPLIER_TP: float = 1.5   # TP = 1.5x ATR
+ATR_MULTIPLIER_SL: float = 1.0   # SL = 1.0x ATR
+MIN_SL_PIPS: int = 10            # SL minimum 10 pips
+MAX_SL_PIPS: int = 50            # SL maximum 50 pips
 
 # ──────────────────────────────────────────────
 # Filtres de Protection (Spread & Calendrier)
 # ──────────────────────────────────────────────
-MAX_SPREAD_POINTS: int = 500       # Augmenté (test) : 50 → 500 pts pour éviter le blocage spread
+# MIGRATION-EURUSD : Spread en pips EUR/USD (1 pip = 10 points sur Exness)
+# Normal=150pts(15pips), Aggro=250pts(25pips), Safe=100pts(10pips)
+MAX_SPREAD_POINTS: int = 150       # MIGRATION-EURUSD : 15 pips = 150 points (normal)
 BLOCK_NEWS_IMPORTANCE: int = 3    # 3 = Haute importance (NFP, CPI, Fed)
-NEWS_CHECK_WINDOW_MINS: int = 30  # Abaissé (test) : 60 → 30 min avant/après une news majeure
+NEWS_CHECK_WINDOW_MINS: int = 30  # ±30 min avant/après une news majeure
 
 # ──────────────────────────────────────────────
 # Gestion Active des Positions (Nouveau)

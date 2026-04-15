@@ -1,7 +1,7 @@
-# GOLDBOT — Script de démarrage
+# FXBOT EUR/USD — Script de démarrage  # MIGRATION-EURUSD
 # Usage : .\run.ps1
 
-Write-Host "=== GOLDBOT ===" -ForegroundColor Cyan
+Write-Host "=== FXBOT EUR/USD ===" -ForegroundColor Cyan  # MIGRATION-EURUSD
 
 # Vérification .env
 if (-not (Test-Path ".env")) {

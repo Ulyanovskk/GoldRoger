@@ -1,6 +1,8 @@
 """
-excel_logger.py — Observabilité Excel GOLDBOT (M10).
+excel_logger.py — Observabilité Excel FXBOT EUR/USD (M10).
 Écriture non-bloquante via asyncio.to_thread.
+
+# MIGRATION-EURUSD : Migration complète XAU/USD → EUR/USD (2026-04-15)
 """
 
 import os
@@ -13,7 +15,7 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
 
-EXCEL_PATH = "goldbot_performance.xlsx"
+EXCEL_PATH = "fxbot_eurusd_performance.xlsx"  # MIGRATION-EURUSD : goldbot_performance.xlsx → fxbot_eurusd_performance.xlsx
 
 # ── Colonnes ────────────────────────────────────────────────────────────────
 

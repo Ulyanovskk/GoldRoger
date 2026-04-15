@@ -1,11 +1,12 @@
 """
-bot.py — Orchestrateur principal du GOLDBOT.
+bot.py — Orchestrateur principal du FXBOT EUR/USD.
     - Boucle de trading toutes les 15 minutes (alignée M15)
     - Bot Telegram asynchrone (commandes /start, /stop, /pause, /status, etc.)
     - Watchdog : survie aux exceptions non gérées
     - Résumé journalier à 23h00
     - Gestion propre de l'arrêt (fermeture des trades)
 
+    # MIGRATION-EURUSD : Migration complète XAU/USD → EUR/USD (2026-04-15)
     Compatible : python-telegram-bot >= 21.0
 """
 
@@ -422,7 +423,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         utils.bot_log.info("AUDIT-FIX #3 — start_balance fixé au démarrage /start : %.2f$", state.start_balance)
 
     msg = (
-        f"🚀 <b>GOLDBOT démarré</b>\n"
+        f"🚀 <b>FXBOT EUR/USD démarré</b>\n"  # MIGRATION-EURUSD
         f"💰 Balance : {account.balance:.2f} USD\n"
         f"🏦 Compte   : #{config.MT5_LOGIN}\n"
         f"📡 Serveur  : {config.MT5_SERVER}\n"
@@ -445,7 +446,7 @@ async def cmd_stop(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await state.set_status(BotState.STOPPED)
 
     msg = (
-        f"🛑 <b>GOLDBOT arrêté</b>\n"
+        f"🛑 <b>FXBOT EUR/USD arrêté</b>\n"  # MIGRATION-EURUSD
         f"Positions fermées : {closed}"
     )
     await update.message.reply_text(msg, parse_mode="HTML")
@@ -484,7 +485,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     dd = utils.get_daily_drawdown_pct(start_balance=state.start_balance)
 
     msg = (
-        f"📊 <b>STATUT GOLDBOT</b>\n"
+        f"📊 <b>STATUT FXBOT EUR/USD</b>\n"  # MIGRATION-EURUSD
         f"État      : {emoji} {state.status.capitalize()}\n"
         f"MT5       : {connected_str}\n"
         f"Session   : 🕐 {session}\n"
@@ -608,8 +609,8 @@ async def cmd_mode(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     else:
         await update.message.reply_text("❌ Modes valides : safe, normal, aggro")
         return
-    # AUDIT-FIX #6 — Résumé : spread_max affiché selon mode
-    spread_info = {"aggro": 55, "safe": 30, "normal": config.MAX_SPREAD_POINTS}.get(mode, "?")
+    # AUDIT-FIX #6 — Résumé : spread_max affiché selon mode (MIGRATION-EURUSD : valeurs en points EUR/USD)
+    spread_info = {"aggro": 250, "safe": 100, "normal": config.MAX_SPREAD_POINTS}.get(mode, "?")
     await update.message.reply_text(
         f"🎭 Mode <b>{mode.upper()}</b> activé\n"
         f"Risque {state.max_risk_pct}% | Conf. min {state.min_confidence}% | Spread max {spread_info}pts",
@@ -729,13 +730,13 @@ def main() -> None:
       - Lance la boucle de trading dans un thread parallèle
     """
     utils.bot_log.info("╔══════════════════════════════╗")
-    utils.bot_log.info("║      GOLDBOT  démarrage      ║")
+    utils.bot_log.info("║  FXBOT EUR/USD  démarrage  ║")  # MIGRATION-EURUSD
     utils.bot_log.info("╚══════════════════════════════╝")
 
     # ── Connexion MT5 initiale ──────────────────────────────────
     if not utils.mt5_connect():
         utils.bot_log.critical("Impossible de démarrer MT5. Arrêt.")
-        utils.send_telegram("❌ <b>GOLDBOT</b> : Impossible de démarrer MT5. Vérifiez les credentials.")
+        utils.send_telegram("❌ <b>FXBOT EUR/USD</b> : Impossible de démarrer MT5. Vérifiez les credentials.")  # MIGRATION-EURUSD
         sys.exit(1)
 
     # ── Vérification token Telegram ─────────────────────────────
@@ -775,7 +776,7 @@ def main() -> None:
     account = mt5.account_info()
     bal_str = f"{account.balance:.2f} USD" if account else "N/A"
     utils.send_telegram(
-        f"🤖 <b>GOLDBOT en ligne</b>\n"
+        f"🤖 <b>FXBOT EUR/USD en ligne</b>\n"  # MIGRATION-EURUSD
         f"Compte : #{config.MT5_LOGIN} | Balance : {bal_str}\n"
         f"Envoyez /start pour lancer le trading."
     )
@@ -800,7 +801,7 @@ def main() -> None:
         trading_loop.call_soon_threadsafe(trading_loop.stop)
         trading_thread.join(timeout=10)
         utils.mt5_disconnect()
-        utils.bot_log.info("GOLDBOT arrêté proprement.")
+        utils.bot_log.info("FXBOT EUR/USD arrêté proprement.")  # MIGRATION-EURUSD
 
 
 def _handle_signal(sig, frame) -> None:
@@ -831,5 +832,5 @@ if __name__ == "__main__":
         pass
     except Exception as e:
         utils.bot_log.critical("Erreur fatale au démarrage : %s", e, exc_info=True)
-        utils.send_telegram(f"💀 <b>GOLDBOT crash fatal</b> : {str(e)[:300]}")
+        utils.send_telegram(f"💀 <b>FXBOT EUR/USD crash fatal</b> : {str(e)[:300]}")  # MIGRATION-EURUSD
         sys.exit(1)

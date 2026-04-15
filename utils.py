@@ -1,5 +1,5 @@
 """
-utils.py — Toutes les fonctions utilitaires du bot GOLDBOT :
+utils.py — Toutes les fonctions utilitaires du bot FXBOT EUR/USD :
     - Connexion / données MetaTrader 5
     - Calcul des indicateurs techniques
     - Compression des données pour DeepSeek
@@ -9,6 +9,8 @@ utils.py — Toutes les fonctions utilitaires du bot GOLDBOT :
     - Exécution des ordres MT5
     - Alertes et commandes Telegram
     - Logging
+
+# MIGRATION-EURUSD : Migration complète XAU/USD → EUR/USD (2026-04-15)
 """
 
 import os
@@ -427,11 +429,11 @@ def is_high_impact_news() -> tuple[bool, str]:
         if not hasattr(mt5, 'calendar_get'):
             return False, ""
 
-        # Récupération des événements du calendrier MT5
+        # MIGRATION-EURUSD : devises EUR/USD au lieu de USD/XAU
         events = mt5.calendar_get(time_from=int(start.timestamp()), time_to=int(end.timestamp()))
         if events:
             for ev in events:
-                if ev.importance >= config.BLOCK_NEWS_IMPORTANCE and ev.currency in ("USD", "XAU"):
+                if ev.importance >= config.BLOCK_NEWS_IMPORTANCE and ev.currency in ("USD", "EUR"):
                     return True, ev.name
         return False, ""
     except Exception as e:
@@ -440,7 +442,7 @@ def is_high_impact_news() -> tuple[bool, str]:
 
 
 def fetch_market_news() -> str:
-    """Récupère les prochains événements économiques majeurs via MT5 (USD/XAU)."""
+    """Récupère les prochains événements économiques majeurs via MT5 (USD/EUR). # MIGRATION-EURUSD"""
     try:
         if not hasattr(mt5, 'calendar_get'):
             return "news:N/A"
@@ -451,8 +453,8 @@ def fetch_market_news() -> str:
         
         events = mt5.calendar_get(time_from=int(now.timestamp()), time_to=int(end.timestamp()))
         if events:
-            # On filtre les news de moyenne et haute importance pour USD et Or
-            important = [ev for ev in events if ev.importance >= 2 and ev.currency in ("USD", "XAU")]
+            # MIGRATION-EURUSD : filtrer USD et EUR (EUR/USD impacté par les deux devises)
+            important = [ev for ev in events if ev.importance >= 2 and ev.currency in ("USD", "EUR")]
             if important:
                 lines = []
                 for ev in important[:3]:
@@ -491,7 +493,7 @@ def compress_data(data: dict, context: dict = None) -> str:
 
             parts.append(f"CTX:L3={l3 or 'None'},WB={wb},SR={sr},BUY_wr={buy_wr}%,SELL_wr={sell_wr}%")
 
-        parts.append("XAU")
+        parts.append("EURUSD")  # MIGRATION-EURUSD : XAU → EURUSD
 
         # AUDIT-FIX #1 — Clés alignées avec le dict du prompt système :
         # R=RSI, M=MACD, B=Bollinger, E=EMA_trend, A=ATR
@@ -534,9 +536,9 @@ def compress_data(data: dict, context: dict = None) -> str:
         parts.append(f"bal={int(data['balance'])}USD")
         parts.append(f"sess={get_current_session()}")
 
-        # Dollar Index + News (Crucial pour Gold)
-        parts.append(fetch_dxy_data())
-        parts.append(fetch_market_news())
+        # MIGRATION-EURUSD : DXY retiré comme indicateur principal — USD Index générale uniquement
+        # parts.append(fetch_dxy_data())  # Supprimé pour EUR/USD
+        parts.append(fetch_market_news())  # News EUR et USD
 
         parts.append(f"price={data['current_price']}")
 
@@ -696,27 +698,28 @@ def pre_ia_filter(data: dict, mode: str = "normal", start_balance: float = 0.0) 
     AUDIT-FIX #6 — Filtre pré-IA avec comportement adapté au mode (aggro/safe/normal).
     AUDIT-FIX #3 — Utilise start_balance pour le calcul du drawdown journalier.
 
+    # MIGRATION-EURUSD : Seuils spread recalibrés EUR/USD (1 pip = 10 points sur Exness)
     Règles par mode :
-      aggro : NEWS_BLOCK actif | SPREAD_MAX=55 | filtre trend désactivé | MIN_CONFIDENCE=60
-      safe  : SPREAD_MAX=30    | MIN_CONFIDENCE=68 | filtre trend H1+H4 actif
-      normal: valeurs par défaut de config.py
+      aggro : NEWS_BLOCK actif | SPREAD_MAX=250pts(25pips) | filtre trend désactivé | MIN_CONFIDENCE=60
+      safe  : SPREAD_MAX=100pts(10pips) | MIN_CONFIDENCE=68 | filtre trend H1+H4 actif
+      normal: SPREAD_MAX=150pts(15pips) (valeurs par défaut de config.py)
     """
     now_str = datetime.datetime.now().strftime("%H:%M")
 
     # AUDIT-FIX #6 — Résolution des paramètres selon le mode
     mode = (mode or "normal").lower()
     if mode == "aggro":
-        spread_max   = 55    # AUDIT-FIX #6 : SPREAD_MAX aggro
+        spread_max   = 250   # MIGRATION-EURUSD : 25 pips = 250 points en mode aggro
         min_conf     = 60    # AUDIT-FIX #6 : MIN_CONFIDENCE aggro
         trend_filter = False # AUDIT-FIX #6 : filtre trend désactivé
         news_block   = True  # AUDIT-FIX #6 : NEWS_BLOCK toujours actif
     elif mode == "safe":
-        spread_max   = 30    # AUDIT-FIX #6 : SPREAD_MAX safe
+        spread_max   = 100   # MIGRATION-EURUSD : 10 pips = 100 points en mode safe
         min_conf     = 68    # AUDIT-FIX #6 : MIN_CONFIDENCE safe
         trend_filter = True  # AUDIT-FIX #6 : filtre trend H1+H4 actif
         news_block   = True
     else:  # normal
-        spread_max   = config.MAX_SPREAD_POINTS  # AUDIT-FIX #6 : valeurs config.py
+        spread_max   = config.MAX_SPREAD_POINTS  # MIGRATION-EURUSD : 150pts (15 pips) par défaut
         min_conf     = config.MIN_CONFIDENCE
         trend_filter = False  # comportement hérité : trend informatif uniquement
         news_block   = True
@@ -1024,13 +1027,15 @@ def calculate_lot(balance: float, sl_pips: float, risk_pct: float = None) -> flo
     """
     Calcul du lot dynamique avec protection petit compte et risque variable.
     risk_pct : si fourni, outrepasse la config (permet le contrôle via Telegram).
+
+    # MIGRATION-EURUSD : EUR/USD sur Exness — lot 0.01 = 0.1$/pip
     """
     effective_risk = risk_pct if risk_pct is not None else config.RISK_PERCENT
     risk_amount = balance * (effective_risk / 100)
     
-    # XAUUSDm : lot 0.01 = ~1$/pip (100 points)
-    pip_value = 0.01 
-    if sl_pips == 0: sl_pips = 1.0 # Guard
+    # MIGRATION-EURUSD : EUR/USD sur Exness : lot 0.01 = 0.1$/pip
+    pip_value = 0.1   # MIGRATION-EURUSD : XAUUSDm 0.01 → EURUSDm 0.1
+    if sl_pips == 0: sl_pips = 1.0  # Guard
     lot = risk_amount / (sl_pips * pip_value * 100)
     
     # Pour les petits comptes (balance < 100$), on force 0.01 au lieu de 0.0
@@ -1230,7 +1235,7 @@ def close_all_positions() -> int:
                 "price":        close_price,
                 "deviation":    20,
                 "magic":        config.MT5_MAGIC,
-                "comment":      "GOLDBOT|STOP_CMD",
+                "comment":      "FXBOT|STOP_CMD",  # MIGRATION-EURUSD : GOLDBOT → FXBOT
                 "type_time":    mt5.ORDER_TIME_GTC,
                 "type_filling": mt5.ORDER_FILLING_IOC,
             }
@@ -1350,7 +1355,7 @@ def process_active_trade_management(pos) -> None:
 
         # 2. Clôture Partielle + Break-even (M12 — TP1 dynamique)
         if config.USE_PARTIAL_CLOSE and "|PC" not in pos.comment:
-            # Lecture CONF/RR depuis le commentaire (format GOLDBOT|REASON|CONF=XX)
+            # Lecture CONF/RR depuis le commentaire (format FXBOT|REASON|CONF=XX) # MIGRATION-EURUSD
             _conf, _rr = 85, 2.0
             try:
                 for part in pos.comment.split("|"):
@@ -1585,11 +1590,11 @@ def alert_error(error_msg: str) -> None:
 
 def alert_daily_summary(balance: float, equity: float, trades_today: int,
                          profit_today: float) -> None:
-    """Résumé journalier envoyé à 23h00."""
+    """Résumé journalier envoyé à 23h00. # MIGRATION-EURUSD : header mis à jour"""
     dd = (balance - equity) / balance * 100 if balance > 0 else 0
     emoji = "📈" if profit_today >= 0 else "📉"
     msg = (
-        f"{emoji} <b>RÉSUMÉ JOURNALIER GOLDBOT</b>\n"
+        f"{emoji} <b>RÉSUMÉ JOURNALIER FXBOT EUR/USD</b>\n"  # MIGRATION-EURUSD
         f"💰 Balance : {balance:.2f} USD\n"
         f"📊 Equity  : {equity:.2f} USD\n"
         f"📉 Drawdown: {dd:.2f}%\n"

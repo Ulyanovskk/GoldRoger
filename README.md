@@ -1,6 +1,8 @@
-# 🏆 GOLDBOT v2.0 — AI Trading System
+# 🤖 FXBOT EUR/USD v2.0 — AI Trading System
 
-GOLDBOT est un bot de trading algorithmique pour l'Or (**XAUUSD**) basé sur l'IA DeepSeek et MetaTrader 5. La version 2.0 apporte une architecture orientée résilience, une gestion de risque dynamique et une observabilité complète via Excel.
+<!-- MIGRATION-EURUSD : Migration complète XAU/USD → EUR/USD (2026-04-15) -->
+
+FXBOT EUR/USD est un bot de trading algorithmique pour la paire **EUR/USD** basé sur l'IA DeepSeek et MetaTrader 5. La version 2.0 apporte une architecture orientée résilience, une gestion de risque dynamique et une observabilité complète via Excel.
 
 ---
 
@@ -49,7 +51,7 @@ graph TD
 
 - **Circuit Breaker** : Si l'API DeepSeek échoue 5 fois, le bot bascule en mode technique pur ou se met en pause 15 min.
 - **Fallback Technique** : Algorithme de secours basé sur l'alignement EMA + RSI en cas d'indisponibilité de l'IA.
-- **Observabilité Excel** : Suivi en temps réel des trades, des sessions et des signaux refusés dans `goldbot_performance.xlsx`.
+- **Observabilité Excel** : Suivi en temps réel des trades, des sessions et des signaux refusés dans `fxbot_eurusd_performance.xlsx`.  <!-- MIGRATION-EURUSD -->
 - **Alertes Proactives** : Pause automatique si le Win Rate chute sous 40% ou si le Drawdown atteint 3%.
 
 ---
@@ -65,4 +67,4 @@ graph TD
 ---
 
 ## 📝 Licence
-Usage privé uniquement. GOLDBOT n'est pas un conseil en investissement. Le trading de CFD comporte des risques élevés.
+Usage privé uniquement. FXBOT EUR/USD n'est pas un conseil en investissement. Le trading de CFD comporte des risques élevés.  <!-- MIGRATION-EURUSD -->
