@@ -1021,13 +1021,19 @@ def get_account_balance() -> float:
 
 
 def calculate_lot(balance: float, sl_pips: float) -> float:
-    """Calcul du lot dynamique selon le risque défini dans config."""
+    """
+    Calcul du lot dynamique avec protection petit compte.
+    On garantit 0.01 lot même si le risque de 1.5% est mathématiquement trop petit.
+    """
     risk_amount = balance * (config.RISK_PERCENT / 100)
-    # XAUUSDm Exness : lot 0.01 = ~1$/pip (100 points)
-    # On reste sur une base sécurisée
+    # XAUUSDm : lot 0.01 = ~1$/pip (100 points)
     pip_value = 0.01 
+    if sl_pips == 0: sl_pips = 1.0 # Guard
     lot = risk_amount / (sl_pips * pip_value * 100)
-    return round(max(0.01, min(lot, 5.0)), 2)
+    
+    # Pour les petits comptes (balance < 100$), on force 0.01 au lieu de 0.0
+    final_lot = max(0.01, lot)
+    return round(min(final_lot, 5.0), 2)
 
 
 def validate_signal(signal: dict, balance: float, current_price: float, 
@@ -1049,16 +1055,13 @@ def validate_signal(signal: dict, balance: float, current_price: float,
         if signal["RR"] < config.MIN_RR:
             return False, signal, f"SKIP RR insuffisant | {signal['RR']} < {config.MIN_RR} | Heure={now_str}"
 
-        # 3. GARDE-FOU TREND (H1/H4 EMA20/50)
+        # 3. GARDE-FOU TREND (H1/H4 EMA20/50) — Non-bloquant pour prendre quelques risques
         if market_data:
             trend = get_trend_direction(market_data)
-            if signal["DIR"] == "BUY" and trend == "SELL":
-                return False, signal, f"SKIP Trend opposé | Signal=BUY vs Trend=SELL | Heure={now_str}"
-            if signal["DIR"] == "SELL" and trend == "BUY":
-                return False, signal, f"SKIP Trend opposé | Signal=SELL vs Trend=BUY | Heure={now_str}"
-            if trend == "RANGE":
-                # On peut choisir de bloquer ou laisser passer, ic on reste prudent
-                bot_log.info("Note: Trend en RANGE sur H1/H4")
+            bot_log.info("Analyse Trend: %s | Signal: %s", trend, signal["DIR"])
+            # On ne bloque plus le trade, on logue simplement si on est contre la tendance
+            if (signal["DIR"] == "BUY" and trend == "SELL") or (signal["DIR"] == "SELL" and trend == "BUY"):
+                bot_log.warning("ATTENTION : Trade contre-tendance initié par l'IA.")
 
         # 4. Cohérence SL/TP
         if signal["DIR"] == "BUY":

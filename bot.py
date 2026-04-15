@@ -600,10 +600,10 @@ async def cmd_mode(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         state.max_risk_pct, state.min_confidence = 0.5, 68   # AUDIT-FIX #6 : safe → conf=68
         state.mode = "safe"
     elif mode == "normal":
-        state.max_risk_pct, state.min_confidence = 1.5, config.MIN_CONFIDENCE  # valeurs config
+        state.max_risk_pct, state.min_confidence = 1.5, 55  # Abaissé à 55
         state.mode = "normal"
     elif mode == "aggro":
-        state.max_risk_pct, state.min_confidence = 3.0, 60   # AUDIT-FIX #6 : aggro → conf=60
+        state.max_risk_pct, state.min_confidence = 5.0, 50   # Risque 5% et Confiance 50%
         state.mode = "aggro"
     else:
         await update.message.reply_text("❌ Modes valides : safe, normal, aggro")
