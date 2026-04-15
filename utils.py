@@ -1299,19 +1299,24 @@ async def execute_trade_async(signal: dict) -> Optional[dict]:  # AUDIT-FIX #2
             price      = tick.ask if signal["DIR"] == "BUY" else tick.bid
             deviation  = 20  # pips de slippage maximum
 
+            # FIX-EXECUTION — Précision décimale dynamique pour SL/TP
+            digits = symbol_info.digits
+            sl_final = round(signal["SL"], digits)
+            tp_final = round(signal["TP"], digits)
+
             request = {
                 "action":        mt5.TRADE_ACTION_DEAL,
                 "symbol":        config.MT5_SYMBOL,
-                "volume":        signal["LOT"],
+                "volume":        float(signal["LOT"]),
                 "type":          order_type,
-                "price":         price,
-                "sl":            signal["SL"],
-                "tp":            signal["TP"],
+                "price":         float(price),
+                "sl":            float(sl_final),
+                "tp":            float(tp_final),
                 "deviation":     deviation,
                 "magic":         config.MT5_MAGIC,
-                "comment":       f"GB-{signal['CONF']}",
+                "comment":       f"FX-{signal['CONF']}",
                 "type_time":     mt5.ORDER_TIME_GTC,
-                "type_filling":  mt5.ORDER_FILLING_IOC,
+                "type_filling":  mt5.ORDER_FILLING_FOK,  # Plus robuste sur Exness
             }
             result = mt5.order_send(request)  # AUDIT-FIX #2 — order_send protégé
 
@@ -1429,10 +1434,13 @@ def modify_position_sl(ticket: int, new_sl: float) -> bool:
     AUDIT-FIX #2 — positions_get + order_send via contexte synchrone du monitoring_loop.
     """
     try:
+        symbol_info = mt5.symbol_info(config.MT5_SYMBOL)
+        digits = symbol_info.digits if symbol_info else 5
+        
         request = {
             "action": mt5.TRADE_ACTION_SLTP,
             "position": ticket,
-            "sl": round(new_sl, 2),
+            "sl": round(new_sl, digits), # Précision fixe pour FX
         }
         pos = mt5.positions_get(ticket=ticket)  # AUDIT-FIX #2 — positions_get protégé
         if pos:
