@@ -54,12 +54,12 @@ DEEPSEEK_SYSTEM_PROMPT: str = (
     "STRUCT=UPTREND/DOWNTREND/RANGE, LRS=Linear Regression Slope (float), "
     "SLOPE_M15/H1=EMA slope, CH_POS=channel pos, R_SLOPE=RSI accel. "
 
-    "PRIORITY RULE (ENTRY TIMING): "
+    "PRIORITY RULE (SAFE ENTRY): "
     "1. LRS & SLOPE define the flow. But CH_POS & R_SLOPE define the ENTRY. "
     "2. SELL TIMING: Enter if (CH_POS=TOP/MID) OR (CH_POS=BOTTOM AND R_SLOPE=ACCEL_DOWN). "
-    "   -> If CH_POS=BOTTOM and R_SLOPE=FLAT: HOLD (Wait for better price or breakout). "
+    "   -> STRICT: If RSI < 35, DO NOT SELL unless R_SLOPE=ACCEL_DOWN (Capitulation). "
     "3. BUY TIMING: Enter if (CH_POS=BOTTOM/MID) OR (CH_POS=TOP AND R_SLOPE=ACCEL_UP). "
-    "   -> If CH_POS=TOP and R_SLOPE=FLAT: HOLD (Wait for better price or breakout). "
+    "   -> STRICT: If RSI > 65, DO NOT BUY unless R_SLOPE=ACCEL_UP (Breakout). "
     "4. Target RR 1.3+ by looking for next S/R levels, but 1.0 is acceptable for scalp. "
     "5. Use LRS to override LT Bullish bias if M15 flow is strongly established. "
 
