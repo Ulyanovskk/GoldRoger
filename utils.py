@@ -1165,33 +1165,33 @@ def get_account_balance() -> float:
     return info.balance
 
 
-def calculate_lot(balance: float, sl_pips: float, risk_pct: float = None) -> float:
+def calculate_lot(balance: float, sl_price_diff: float, risk_pct: float = None) -> float:
     """
     # DYNAMIC-ADAPTATION — Calcul du lot 100% universel via MT5.
-    Utilise la valeur réelle du tick fournie par le broker pour le symbole actuel.
-    Fonctionne sur Forex, Or, Indices, Crypto sans modification.
+    sl_price_diff : la différence de prix brute (ex: 0.00061)
     """
     try:
         effective_risk = risk_pct if risk_pct is not None else config.RISK_PERCENT
         risk_amount = balance * (effective_risk / 100)
         
         symbol_info = mt5.symbol_info(config.MT5_SYMBOL)
-        if symbol_info is None:
+        if symbol_info is None or symbol_info.trade_tick_value <= 0:
             return 0.01
 
-        # tick_value = profit en monnaie de compte pour 1 lot si le prix bouge de 1 tick
+        # 1. On calcule le nombre de points réels du SL
+        # Sur EUR/USD, 0.00061 / 0.00001 = 61 points
+        tick_size = symbol_info.point
+        if sl_price_diff <= 0: return 0.01
+        sl_points = sl_price_diff / tick_size
+        
+        # 2. Formule : Lot = Risque_USD / (Points * Valeur_du_tick)
         tick_value = symbol_info.trade_tick_value
-        tick_size  = symbol_info.point # ou tick_size
-        
-        if tick_value <= 0 or sl_pips <= 0:
-            return 0.01
-
-        # Nombre de points de SL (1 pip = 10 points sur la majorité des brokers 5 digits)
-        # Mais pour être universel, on calcule le risque par point
-        sl_points = sl_pips * 10 
-        
-        # Formule : Lot = Risque / (SL_points * Valeur_du_point_pour_1_lot)
         lot = risk_amount / (sl_points * tick_value)
+        
+        # 3. Sécurité supplémentaire pour EUR/USD et petits comptes
+        # On ne veut jamais que le bot propose 45 lots ! 
+        # On bride à 1.0 lot maximum par trade pour la sécurité.
+        lot = min(lot, 1.0)
         
         # Respecter les limites du broker
         lot = max(symbol_info.volume_min, lot)
@@ -1200,6 +1200,10 @@ def calculate_lot(balance: float, sl_pips: float, risk_pct: float = None) -> flo
         
         final_lot = round(lot / step) * step
         return round(final_lot, 2)
+        
+    except Exception as e:
+        bot_log.error("Erreur calculate_lot : %s", e)
+        return 0.01
         
     except Exception as e:
         bot_log.error("Erreur calculate_lot dynamique : %s", e)
@@ -1245,9 +1249,9 @@ def validate_signal(signal: dict, balance: float, current_price: float,
             if signal["TP"] >= current_price:
                 return False, signal, f"TP={signal['TP']} >= prix={current_price}"
 
-        # 5. Calcul Lot & Sizing — Utilise le risque dynamique défini via Telegram (state.max_risk_pct)
-        sl_pips = abs(current_price - signal["SL"])
-        max_lot = calculate_lot(balance, sl_pips, risk_pct=max_risk)
+        # 5. Calcul Lot & Sizing
+        sl_diff = abs(current_price - signal["SL"])
+        max_lot = calculate_lot(balance, sl_diff, risk_pct=max_risk)
         signal["LOT"] = max_lot
 
         # Log de validation finale
