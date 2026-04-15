@@ -56,7 +56,8 @@ DEEPSEEK_SYSTEM_PROMPT: str = (
 
     "PRIORITY RULE (DYNAMIC REVOLUTION): "
     "1. LRS is the absolute truth for structure. If LRS < -0.00002 → DOWNTREND is active. "
-    "2. If LRS and SLOPE_M15 agree, TRADE THE FLOW. "
+    "2. If LRS and SLOPE_M15 agree, TRADE THE FLOW. Target RR 1.3+ if possible by "
+    "   looking for next S/R levels, but 1.0 is acceptable for scalp. "
     "3. Ignore CH_POS=BOTTOM if LRS is negative and R_SLOPE is FLAT/DOWN (Trend continuation). "
     "4. Ignore LT Bullish bias (D1/H4) if LRS M15 is strongly negative (Scalp/Intraday flow). "
 
@@ -99,7 +100,7 @@ RISK_PERCENT: float = 1.5
 MAX_DAILY_DRAWDOWN: float = float(os.getenv("MAX_DAILY_DRAWDOWN", "10.0"))  # Lu depuis .env — ne jamais hardcoder ailleurs
 MIN_CONFIDENCE: int = int(os.getenv("MIN_CONFIDENCE", "55"))  # Abaissé à 55% pour plus d'activité
 MAX_SIMULTANEOUS_TRADES: int = int(os.getenv("MAX_SIMULTANEOUS_TRADES", "2"))
-MIN_RR: float = 1.1  # Ajusté 1.3 -> 1.1 pour EUR/USD (Flux dynamique)
+MIN_RR: float = 1.0  # Autorisé pour EUR/USD (Scalping/Flux)
 NEWS_BLOCK_WINDOW: int = 20  # GARDE-FOU NEWS : ±20 min autour des news majoritairement impactantes
 
 # ──────────────────────────────────────────────
