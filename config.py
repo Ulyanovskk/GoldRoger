@@ -54,14 +54,14 @@ DEEPSEEK_SYSTEM_PROMPT: str = (
     "STRUCT=UPTREND/DOWNTREND/RANGE, LRS=Linear Regression Slope (float), "
     "SLOPE_M15/H1=EMA slope, CH_POS=channel pos, R_SLOPE=RSI accel. "
 
-    "PRIORITY RULE (SAFE ENTRY): "
-    "1. LRS & SLOPE define the flow. But CH_POS & R_SLOPE define the ENTRY. "
-    "2. SELL TIMING: Enter if (CH_POS=TOP/MID) OR (CH_POS=BOTTOM AND R_SLOPE=ACCEL_DOWN). "
-    "   -> STRICT: If RSI < 35, DO NOT SELL unless R_SLOPE=ACCEL_DOWN (Capitulation). "
-    "3. BUY TIMING: Enter if (CH_POS=BOTTOM/MID) OR (CH_POS=TOP AND R_SLOPE=ACCEL_UP). "
-    "   -> STRICT: If RSI > 65, DO NOT BUY unless R_SLOPE=ACCEL_UP (Breakout). "
-    "4. Target RR 1.3+ by looking for next S/R levels, but 1.0 is acceptable for scalp. "
-    "5. Use LRS to override LT Bullish bias if M15 flow is strongly established. "
+    "PRIORITY RULE (DYNAMIC & MEAN REVERSION): "
+    "1. LRS & SLOPE define the main flow. Always prefer Flow Trading. "
+    "2. MEAN REVERSION (Bounces): You are ALLOWED to BUY at (CH_POS=BOTTOM and RSI < 30) "
+    "   even if LRS is negative, aiming for MID/TOP of channel. "
+    "3. MEAN REVERSION (Bounces): You are ALLOWED to SELL at (CH_POS=TOP and RSI > 70) "
+    "   even if LRS is positive, aiming for MID/BOTTOM of channel. "
+    "4. FOLLOW THE FLOW: If R_SLOPE=ACCEL, prioritize the breakout direction. "
+    "5. Target RR 1.3+ by looking for next S/R levels, but 1.0 is acceptable for scalp. "
 
     "Response MUST be strict JSON only, no extra text: "
     '{"DIR":"BUY|SELL|HOLD", "LOT":0.0, "TP":float, '
