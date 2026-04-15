@@ -1020,12 +1020,14 @@ def get_account_balance() -> float:
     return info.balance
 
 
-def calculate_lot(balance: float, sl_pips: float) -> float:
+def calculate_lot(balance: float, sl_pips: float, risk_pct: float = None) -> float:
     """
-    Calcul du lot dynamique avec protection petit compte.
-    On garantit 0.01 lot même si le risque de 1.5% est mathématiquement trop petit.
+    Calcul du lot dynamique avec protection petit compte et risque variable.
+    risk_pct : si fourni, outrepasse la config (permet le contrôle via Telegram).
     """
-    risk_amount = balance * (config.RISK_PERCENT / 100)
+    effective_risk = risk_pct if risk_pct is not None else config.RISK_PERCENT
+    risk_amount = balance * (effective_risk / 100)
+    
     # XAUUSDm : lot 0.01 = ~1$/pip (100 points)
     pip_value = 0.01 
     if sl_pips == 0: sl_pips = 1.0 # Guard
@@ -1075,9 +1077,9 @@ def validate_signal(signal: dict, balance: float, current_price: float,
             if signal["TP"] >= current_price:
                 return False, signal, f"TP={signal['TP']} >= prix={current_price}"
 
-        # 5. Calcul Lot & Sizing (Utilisation du calcul dynamique utilisateur)
+        # 5. Calcul Lot & Sizing — Utilise le risque dynamique défini via Telegram (state.max_risk_pct)
         sl_pips = abs(current_price - signal["SL"])
-        max_lot = calculate_lot(balance, sl_pips)
+        max_lot = calculate_lot(balance, sl_pips, risk_pct=max_risk)
         signal["LOT"] = max_lot
 
         # Log de validation finale
