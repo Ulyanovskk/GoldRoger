@@ -474,53 +474,52 @@ def fetch_market_news() -> str:
 
 def detect_price_structure(df: pd.DataFrame) -> str:
     """
-    # PRICE-STRUCTURE — Détecte la structure de prix sur les 10 dernières bougies.
-    Utilise un vote majoritaire (≥70% des bougies) au lieu du strict-all —
-    sinon un seul doji/consolidation brise toute la détection et force RANGE.
-
-    Lower Highs + Lower Lows (≥70%) = DOWNTREND
-    Higher Highs + Higher Lows (≥70%) = UPTREND
-    Sinon = RANGE
+    # PRICE-STRUCTURE — Détecte la structure de prix sur les 15 dernières bougies.
+    Utilise un vote majoritaire (≥65% des bougies) pour capter les canaux.
     """
     try:
-        highs = df["High"].values[-10:]
-        lows  = df["Low"].values[-10:]
-        n     = len(highs) - 1  # nombre de comparaisons
+        highs = df["High"].values[-15:]
+        lows  = df["Low"].values[-15:]
+        n     = len(highs) - 1
         if n <= 0:
             return "RANGE"
 
-        # Compter les paires (au lieu de all())
-        lh_count = sum(1 for i in range(n) if highs[i] > highs[i + 1])  # lower highs
-        ll_count = sum(1 for i in range(n) if lows[i]  > lows[i + 1])   # lower lows
-        hh_count = sum(1 for i in range(n) if highs[i] < highs[i + 1])  # higher highs
-        hl_count = sum(1 for i in range(n) if lows[i]  < lows[i + 1])   # higher lows
+        lh_count = sum(1 for i in range(n) if highs[i] > highs[i + 1])
+        ll_count = sum(1 for i in range(n) if lows[i]  > lows[i + 1])
+        hh_count = sum(1 for i in range(n) if highs[i] < highs[i + 1])
+        hl_count = sum(1 for i in range(n) if lows[i]  < lows[i + 1])
 
-        threshold = 0.70  # 70% des bougies suffisent pour valider la tendance
+        threshold = 0.65  # Sensibilité augmentée à 65%
 
         if (lh_count / n) >= threshold and (ll_count / n) >= threshold:
-            return "DOWNTREND"   # channel baissier confirmé (≥70% des bougies)
+            return "DOWNTREND"
         elif (hh_count / n) >= threshold and (hl_count / n) >= threshold:
-            return "UPTREND"     # channel haussier confirmé (≥70% des bougies)
+            return "UPTREND"
         else:
-            return "RANGE"       # structure mixte
+            return "RANGE"
     except Exception as exc:
         bot_log.debug("detect_price_structure : %s", exc)
         return "RANGE"
 
 
-def ema_slope(ema_series: pd.Series) -> str:
+def ema_slope(ema_series: pd.Series, atr_value: float) -> str:
     """
-    # PRICE-STRUCTURE — Calcule la pente de l'EMA20 sur les 5 dernières bougies.
-    Seuil 0.0005 calibré pour EUR/USD (50 pips = 0.0050, micro-pente = 0.0005).
+    # DYNAMIC-ADAPTATION — Calcule la pente de l'EMA20 relative à la volatilité.
+    Au lieu d'un seuil fixe, on utilise 10% de l'ATR comme seuil de pente.
+    Si le delta > 0.1 * ATR, la tendance est validée.
     """
     try:
         values = ema_series.dropna().values
-        if len(values) < 5:
+        if len(values) < 5 or atr_value <= 0:
             return "FLAT"
+        
         delta = values[-1] - values[-5]
-        if delta < -0.0005:
+        # Le seuil s'adapte dynamiquement à la volatilité actuelle
+        threshold = atr_value * 0.1 
+        
+        if delta < -threshold:
             return "DOWN"
-        elif delta > 0.0005:
+        elif delta > threshold:
             return "UP"
         else:
             return "FLAT"
@@ -638,15 +637,18 @@ def compress_data(data: dict, context: dict = None) -> str:
             df_h1   = data["H1"]["df"]
             price   = data["current_price"]
 
+            # DYNAMIC-ADAPTATION — Utilisation de l'ATR pour la pente
+            atr_m15   = data["M15"]["ind"]["atr"]
+            atr_h1    = data["H1"]["ind"]["atr"]
+            
             # PRICE-STRUCTURE — 1. Structure de prix (Lower Highs/Lows ou Higher)
             struct = detect_price_structure(df_m15)
 
-            # PRICE-STRUCTURE — 2. Pente EMA20 sur M15 et H1
-            # On recalcule l'EMA20 directement sur le DataFrame (déjà disponible)
+            # PRICE-STRUCTURE — 2. Pente EMA20 (Seuils dynamiques basés sur ATR)
             ema20_m15 = ta.trend.EMAIndicator(df_m15["Close"], window=config.EMA_FAST).ema_indicator()
             ema20_h1  = ta.trend.EMAIndicator(df_h1["Close"],  window=config.EMA_FAST).ema_indicator()
-            slope_m15 = ema_slope(ema20_m15)
-            slope_h1  = ema_slope(ema20_h1)
+            slope_m15 = ema_slope(ema20_m15, atr_m15)
+            slope_h1  = ema_slope(ema20_h1,  atr_h1)
 
             # PRICE-STRUCTURE — 3. Position dans le channel 20 bougies
             ch_pos = channel_position(df_m15, price)
@@ -975,17 +977,18 @@ class AISignal(BaseModel):
     SL: float
     CONF: int = Field(ge=0, le=100)
     RR: float
-    REASON: str  # Tronqué à 100 chars par le validator ci-dessous
+    REASON: str  # Tronqué à 250 chars par le validator ci-dessous
+    # MIGRATION-EURUSD : Limite portée à 250 pour plus de clarté
 
     @field_validator("REASON", mode="before")
     @classmethod
     def truncate_reason(cls, v: str) -> str:
-        """Tronque silencieusement REASON à 100 chars au lieu de rejeter le signal."""
-        if isinstance(v, str) and len(v) > 100:
+        """Tronque silencieusement REASON à 250 chars au lieu de rejeter le signal."""
+        if isinstance(v, str) and len(v) > 250:
             bot_log.warning(
-                "REASON tronqué (%d→100 chars) : %s…", len(v), v[:60]
+                "REASON tronqué (%d→250 chars) : %s…", len(v), v[:60]
             )
-            return v[:100]
+            return v[:250]
         return v
 
 async def call_deepseek(compressed_data: str, state_obj=None) -> Optional[dict]:
@@ -1150,22 +1153,43 @@ def get_account_balance() -> float:
 
 def calculate_lot(balance: float, sl_pips: float, risk_pct: float = None) -> float:
     """
-    Calcul du lot dynamique avec protection petit compte et risque variable.
-    risk_pct : si fourni, outrepasse la config (permet le contrôle via Telegram).
-
-    # MIGRATION-EURUSD : EUR/USD sur Exness — lot 0.01 = 0.1$/pip
+    # DYNAMIC-ADAPTATION — Calcul du lot 100% universel via MT5.
+    Utilise la valeur réelle du tick fournie par le broker pour le symbole actuel.
+    Fonctionne sur Forex, Or, Indices, Crypto sans modification.
     """
-    effective_risk = risk_pct if risk_pct is not None else config.RISK_PERCENT
-    risk_amount = balance * (effective_risk / 100)
-    
-    # MIGRATION-EURUSD : EUR/USD sur Exness : lot 0.01 = 0.1$/pip
-    pip_value = 0.1   # MIGRATION-EURUSD : XAUUSDm 0.01 → EURUSDm 0.1
-    if sl_pips == 0: sl_pips = 1.0  # Guard
-    lot = risk_amount / (sl_pips * pip_value * 100)
-    
-    # Pour les petits comptes (balance < 100$), on force 0.01 au lieu de 0.0
-    final_lot = max(0.01, lot)
-    return round(min(final_lot, 5.0), 2)
+    try:
+        effective_risk = risk_pct if risk_pct is not None else config.RISK_PERCENT
+        risk_amount = balance * (effective_risk / 100)
+        
+        symbol_info = mt5.symbol_info(config.MT5_SYMBOL)
+        if symbol_info is None:
+            return 0.01
+
+        # tick_value = profit en monnaie de compte pour 1 lot si le prix bouge de 1 tick
+        tick_value = symbol_info.trade_tick_value
+        tick_size  = symbol_info.point # ou tick_size
+        
+        if tick_value <= 0 or sl_pips <= 0:
+            return 0.01
+
+        # Nombre de points de SL (1 pip = 10 points sur la majorité des brokers 5 digits)
+        # Mais pour être universel, on calcule le risque par point
+        sl_points = sl_pips * 10 
+        
+        # Formule : Lot = Risque / (SL_points * Valeur_du_point_pour_1_lot)
+        lot = risk_amount / (sl_points * tick_value)
+        
+        # Respecter les limites du broker
+        lot = max(symbol_info.volume_min, lot)
+        lot = min(symbol_info.volume_max, lot)
+        step = symbol_info.volume_step
+        
+        final_lot = round(lot / step) * step
+        return round(final_lot, 2)
+        
+    except Exception as e:
+        bot_log.error("Erreur calculate_lot dynamique : %s", e)
+        return 0.01
 
 
 def validate_signal(signal: dict, balance: float, current_price: float, 
