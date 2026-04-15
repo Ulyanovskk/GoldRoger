@@ -54,12 +54,14 @@ DEEPSEEK_SYSTEM_PROMPT: str = (
     "STRUCT=UPTREND/DOWNTREND/RANGE, LRS=Linear Regression Slope (float), "
     "SLOPE_M15/H1=EMA slope, CH_POS=channel pos, R_SLOPE=RSI accel. "
 
-    "PRIORITY RULE (DYNAMIC REVOLUTION): "
-    "1. LRS is the absolute truth for structure. If LRS < -0.00002 → DOWNTREND is active. "
-    "2. If LRS and SLOPE_M15 agree, TRADE THE FLOW. Target RR 1.3+ if possible by "
-    "   looking for next S/R levels, but 1.0 is acceptable for scalp. "
-    "3. Ignore CH_POS=BOTTOM if LRS is negative and R_SLOPE is FLAT/DOWN (Trend continuation). "
-    "4. Ignore LT Bullish bias (D1/H4) if LRS M15 is strongly negative (Scalp/Intraday flow). "
+    "PRIORITY RULE (ENTRY TIMING): "
+    "1. LRS & SLOPE define the flow. But CH_POS & R_SLOPE define the ENTRY. "
+    "2. SELL TIMING: Enter if (CH_POS=TOP/MID) OR (CH_POS=BOTTOM AND R_SLOPE=ACCEL_DOWN). "
+    "   -> If CH_POS=BOTTOM and R_SLOPE=FLAT: HOLD (Wait for better price or breakout). "
+    "3. BUY TIMING: Enter if (CH_POS=BOTTOM/MID) OR (CH_POS=TOP AND R_SLOPE=ACCEL_UP). "
+    "   -> If CH_POS=TOP and R_SLOPE=FLAT: HOLD (Wait for better price or breakout). "
+    "4. Target RR 1.3+ by looking for next S/R levels, but 1.0 is acceptable for scalp. "
+    "5. Use LRS to override LT Bullish bias if M15 flow is strongly established. "
 
     "Response MUST be strict JSON only, no extra text: "
     '{"DIR":"BUY|SELL|HOLD", "LOT":0.0, "TP":float, '
