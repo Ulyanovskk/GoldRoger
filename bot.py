@@ -609,11 +609,11 @@ async def cmd_mode(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     else:
         await update.message.reply_text("❌ Modes valides : safe, normal, aggro")
         return
-    # AUDIT-FIX #6 — Résumé : spread_max affiché selon mode (MIGRATION-EURUSD : valeurs en points EUR/USD)
-    spread_info = {"aggro": 250, "safe": 100, "normal": config.MAX_SPREAD_POINTS}.get(mode, "?")
+    # HOTFIX-2 — Spread affiché en PIPS (pas en points) — 15 pips normal, 25 aggro, 10 safe
+    spread_info = {"aggro": 25, "safe": 10, "normal": config.MAX_SPREAD_POINTS}.get(mode, "?")
     await update.message.reply_text(
         f"🎭 Mode <b>{mode.upper()}</b> activé\n"
-        f"Risque {state.max_risk_pct}% | Conf. min {state.min_confidence}% | Spread max {spread_info}pts",
+        f"Risque {state.max_risk_pct}% | Conf. min {state.min_confidence}% | Spread max {spread_info} pips",
         parse_mode="HTML"
     )
 
@@ -701,6 +701,18 @@ def _run_trading_loop(loop: asyncio.AbstractEventLoop) -> None:
     asyncio.set_event_loop(loop)
     while True:
         try:
+            # HOTFIX-1 — Initialiser start_balance AVANT monitoring_loop.
+            # check_proactive_alerts() est appelé toutes les 10s dans monitoring_loop.
+            # Si start_balance == 0.0, les vérifications drawdown sont ignorées (guard AUDIT-FIX #3).
+            # On initialise ici depuis MT5 pour garantir une valeur valide dès le 1er check.
+            import MetaTrader5 as _mt5_init
+            _account_init = _mt5_init.account_info()
+            if _account_init and state.start_balance == 0.0:
+                state.start_balance = _account_init.balance
+                utils.bot_log.info(
+                    "HOTFIX-1 — start_balance initialisé avant monitoring_loop : %.2f$",
+                    state.start_balance
+                )
             # Lancement de la surveillance haute fréquence en arrière-plan
             loop.create_task(monitoring_loop())
             # Lancement de la boucle principale de trading (cycle 15 min)
@@ -709,7 +721,7 @@ def _run_trading_loop(loop: asyncio.AbstractEventLoop) -> None:
             utils.bot_log.critical("ERREUR FATALE SYSTEME : Redémarrage du thread trading dans 30s... %s", exc, exc_info=True)
             utils.alert_error(f"💀 Thread trading crashé : {str(exc)[:200]}\nTentative de redémarrage automatique...")
             import time
-            time.sleep(30) # Attente avant restart total du thread logic
+            time.sleep(30)  # Attente avant restart total du thread logic
 
 
 async def telegram_error_handler(update, context: ContextTypes.DEFAULT_TYPE) -> None:

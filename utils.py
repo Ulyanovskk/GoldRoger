@@ -469,10 +469,89 @@ def fetch_market_news() -> str:
         return "news:?"
 
 
+# PRICE-STRUCTURE — Fonctions d'analyse de la structure de prix
+# Appelées depuis compress_data() pour enrichir le contexte envoyé à DeepSeek.
+
+def detect_price_structure(df: pd.DataFrame) -> str:
+    """
+    # PRICE-STRUCTURE — Détecte la structure de prix sur les 10 dernières bougies.
+    Lower Highs + Lower Lows = DOWNTREND
+    Higher Highs + Higher Lows = UPTREND
+    Sinon = RANGE
+    """
+    try:
+        highs = df["High"].values[-10:]
+        lows  = df["Low"].values[-10:]
+
+        lower_highs  = all(highs[i] > highs[i + 1] for i in range(len(highs) - 1))
+        lower_lows   = all(lows[i]  > lows[i + 1]  for i in range(len(lows)  - 1))
+        higher_highs = all(highs[i] < highs[i + 1] for i in range(len(highs) - 1))
+        higher_lows  = all(lows[i]  < lows[i + 1]  for i in range(len(lows)  - 1))
+
+        if lower_highs and lower_lows:
+            return "DOWNTREND"   # channel baissier confirmé
+        elif higher_highs and higher_lows:
+            return "UPTREND"     # channel haussier confirmé
+        else:
+            return "RANGE"       # pas de structure claire
+    except Exception as exc:
+        bot_log.debug("detect_price_structure : %s", exc)
+        return "RANGE"
+
+
+def ema_slope(ema_series: pd.Series) -> str:
+    """
+    # PRICE-STRUCTURE — Calcule la pente de l'EMA20 sur les 5 dernières bougies.
+    Seuil 0.0005 calibré pour EUR/USD (50 pips = 0.0050, micro-pente = 0.0005).
+    """
+    try:
+        values = ema_series.dropna().values
+        if len(values) < 5:
+            return "FLAT"
+        delta = values[-1] - values[-5]
+        if delta < -0.0005:
+            return "DOWN"
+        elif delta > 0.0005:
+            return "UP"
+        else:
+            return "FLAT"
+    except Exception as exc:
+        bot_log.debug("ema_slope : %s", exc)
+        return "FLAT"
+
+
+def channel_position(df: pd.DataFrame, current_price: float) -> str:
+    """
+    # PRICE-STRUCTURE — Position du prix dans le range des 20 dernières bougies.
+    TOP  > 75% du range → proximité résistance
+    BOTTOM < 25% du range → proximité support
+    MID  : milieu du channel
+    """
+    try:
+        highs    = df["High"].values[-20:]
+        lows     = df["Low"].values[-20:]
+        ch_high  = float(np.max(highs))
+        ch_low   = float(np.min(lows))
+        ch_range = ch_high - ch_low
+        if ch_range == 0:
+            return "UNKNOWN"
+        position = (current_price - ch_low) / ch_range
+        if position > 0.75:
+            return "TOP"     # près de la résistance
+        elif position < 0.25:
+            return "BOTTOM"  # près du support
+        else:
+            return "MID"     # milieu du channel
+    except Exception as exc:
+        bot_log.debug("channel_position : %s", exc)
+        return "UNKNOWN"
+
+
 def compress_data(data: dict, context: dict = None) -> str:
     """
     AUDIT-FIX #1 — Compresse les données techniques avec les clés alignées sur le prompt système.
     Mapping : RSI→R, MACD→M, Bollinger→B, EMA_trend→E, ATR→A
+    # PRICE-STRUCTURE — Enrichi avec : STRUCT, SLOPE_M15, SLOPE_H1, CH_POS
     (correspond exactement aux 'Data keys' du DEEPSEEK_SYSTEM_PROMPT dans config.py)
     """
     try:
@@ -541,6 +620,39 @@ def compress_data(data: dict, context: dict = None) -> str:
         parts.append(fetch_market_news())  # News EUR et USD
 
         parts.append(f"price={data['current_price']}")
+
+        # ───────────────────────────────────────
+        # PRICE-STRUCTURE — Analyse structurelle M15
+        # ───────────────────────────────────────
+        try:
+            df_m15  = data["M15"]["df"]
+            df_h1   = data["H1"]["df"]
+            price   = data["current_price"]
+
+            # PRICE-STRUCTURE — 1. Structure de prix (Lower Highs/Lows ou Higher)
+            struct = detect_price_structure(df_m15)
+
+            # PRICE-STRUCTURE — 2. Pente EMA20 sur M15 et H1
+            # On recalcule l'EMA20 directement sur le DataFrame (déjà disponible)
+            ema20_m15 = ta.trend.EMAIndicator(df_m15["Close"], window=config.EMA_FAST).ema_indicator()
+            ema20_h1  = ta.trend.EMAIndicator(df_h1["Close"],  window=config.EMA_FAST).ema_indicator()
+            slope_m15 = ema_slope(ema20_m15)
+            slope_h1  = ema_slope(ema20_h1)
+
+            # PRICE-STRUCTURE — 3. Position dans le channel 20 bougies
+            ch_pos = channel_position(df_m15, price)
+
+            parts.append(
+                f"STRUCT={struct}|SLOPE_M15={slope_m15}|"
+                f"SLOPE_H1={slope_h1}|CH_POS={ch_pos}"
+            )
+            bot_log.debug(
+                "PRICE-STRUCTURE | struct=%s | slope_m15=%s | slope_h1=%s | ch_pos=%s",
+                struct, slope_m15, slope_h1, ch_pos
+            )
+        except Exception as ps_exc:
+            bot_log.warning("PRICE-STRUCTURE calcul ignoré : %s", ps_exc)
+        # ───────────────────────────────────────
 
         return "|".join(parts)
     except Exception as exc:
@@ -698,30 +810,30 @@ def pre_ia_filter(data: dict, mode: str = "normal", start_balance: float = 0.0) 
     AUDIT-FIX #6 — Filtre pré-IA avec comportement adapté au mode (aggro/safe/normal).
     AUDIT-FIX #3 — Utilise start_balance pour le calcul du drawdown journalier.
 
-    # MIGRATION-EURUSD : Seuils spread recalibrés EUR/USD (1 pip = 10 points sur Exness)
+    # HOTFIX-2 — Seuils spread en PIPS (EUR/USD). Formule : (ask-bid)/(point*10)
     Règles par mode :
-      aggro : NEWS_BLOCK actif | SPREAD_MAX=250pts(25pips) | filtre trend désactivé | MIN_CONFIDENCE=60
-      safe  : SPREAD_MAX=100pts(10pips) | MIN_CONFIDENCE=68 | filtre trend H1+H4 actif
-      normal: SPREAD_MAX=150pts(15pips) (valeurs par défaut de config.py)
+      aggro : NEWS_BLOCK actif | SPREAD_MAX=25 pips | filtre trend désactivé | MIN_CONFIDENCE=60
+      safe  : SPREAD_MAX=10 pips | MIN_CONFIDENCE=68 | filtre trend H1+H4 actif
+      normal: SPREAD_MAX=15 pips (config.MAX_SPREAD_POINTS)
     """
     now_str = datetime.datetime.now().strftime("%H:%M")
 
     # AUDIT-FIX #6 — Résolution des paramètres selon le mode
     mode = (mode or "normal").lower()
     if mode == "aggro":
-        spread_max   = 250   # MIGRATION-EURUSD : 25 pips = 250 points en mode aggro
-        min_conf     = 60    # AUDIT-FIX #6 : MIN_CONFIDENCE aggro
-        trend_filter = False # AUDIT-FIX #6 : filtre trend désactivé
-        news_block   = True  # AUDIT-FIX #6 : NEWS_BLOCK toujours actif
+        spread_max   = 25    # HOTFIX-2 : 25 pips en mode aggro
+        min_conf     = 60
+        trend_filter = False
+        news_block   = True
     elif mode == "safe":
-        spread_max   = 100   # MIGRATION-EURUSD : 10 pips = 100 points en mode safe
-        min_conf     = 68    # AUDIT-FIX #6 : MIN_CONFIDENCE safe
-        trend_filter = True  # AUDIT-FIX #6 : filtre trend H1+H4 actif
+        spread_max   = 10    # HOTFIX-2 : 10 pips en mode safe
+        min_conf     = 68
+        trend_filter = True
         news_block   = True
     else:  # normal
-        spread_max   = config.MAX_SPREAD_POINTS  # MIGRATION-EURUSD : 150pts (15 pips) par défaut
+        spread_max   = config.MAX_SPREAD_POINTS  # HOTFIX-2 : 15 pips (config.py)
         min_conf     = config.MIN_CONFIDENCE
-        trend_filter = False  # comportement hérité : trend informatif uniquement
+        trend_filter = False
         news_block   = True
 
     bot_log.info("Filtre pré-IA | mode=%s | spread_max=%d | min_conf=%d | trend=%s",
@@ -749,14 +861,18 @@ def pre_ia_filter(data: dict, mode: str = "normal", start_balance: float = 0.0) 
         if dd >= config.MAX_DAILY_DRAWDOWN:
             return False, f"SKIP: Max DD ({dd:.2f}% >= {config.MAX_DAILY_DRAWDOWN}%) | Heure={now_str}"
 
-    # 3. GARDE-FOU SPREAD — seuil adapté au mode  # AUDIT-FIX #6
+    # 3. GARDE-FOU SPREAD — calculé en PIPS  # HOTFIX-2
     tick = mt5.symbol_info_tick(config.MT5_SYMBOL)
     if tick:
-        spread = (tick.ask - tick.bid) / mt5.symbol_info(config.MT5_SYMBOL).point
+        symbol_info_data = mt5.symbol_info(config.MT5_SYMBOL)
+        # HOTFIX-2 — EUR/USD Exness 5 décimales : point=0.00001, pip=0.0001=10 points
+        # (ask-bid)/point donne des points ; on divise par 10 pour obtenir des PIPS
+        pip_size = symbol_info_data.point * 10
+        spread = round((tick.ask - tick.bid) / pip_size, 1)  # en pips
         if spread > spread_max:
-            bot_log.info("SKIP: spread élevé | Spread=%d > %d | mode=%s | Heure=%s",
+            bot_log.info("SKIP: spread élevé | Spread=%.1f pips > %d pips | mode=%s | Heure=%s",
                          spread, spread_max, mode, now_str)
-            return False, f"SKIP: spread élevé ({spread} > {spread_max}) [mode={mode}]"
+            return False, f"SKIP: spread élevé ({spread} pips > {spread_max} pips) [mode={mode}]"
     else:
         spread = 0
 
@@ -770,7 +886,7 @@ def pre_ia_filter(data: dict, mode: str = "normal", start_balance: float = 0.0) 
 
     # 5. GARDE-FOU TREND — actif en mode safe, informatif en normal, désactivé en aggro  # AUDIT-FIX #6
     trend = get_trend_direction(data)
-    bot_log.info("Trend: %s | Spread=%d | mode=%s | Heure=%s", trend, spread, mode, now_str)
+    bot_log.info("Trend: %s | Spread=%.1f pips | mode=%s | Heure=%s", trend, spread, mode, now_str)  # HOTFIX-2
 
     if trend_filter:  # AUDIT-FIX #6 — bloquant uniquement si mode=safe
         if trend == "RANGE":

@@ -23,7 +23,7 @@ DEEPSEEK_TIMEOUT: int = 30  # secondes
 # DXY_SYMBOL n'est plus utilisé activement pour EUR/USD
 DXY_SYMBOL: str = "DXYm"  # Conservé pour compatibilité — non utilisé en mode EUR/USD
 
-# MIGRATION-EURUSD : Prompt système mis à jour pour EUR/USD M15
+# MIGRATION-EURUSD + PRICE-STRUCTURE : Prompt système mis à jour pour EUR/USD M15
 DEEPSEEK_SYSTEM_PROMPT: str = (
     "You are a professional EUR/USD Forex trader analyst. "
     "You specialize in M15 technical analysis on EUR/USD. "
@@ -43,6 +43,18 @@ DEEPSEEK_SYSTEM_PROMPT: str = (
 
     "Data keys: R=RSI, M=MACD, B=Bollinger, "
     "E=EMA trend, A=ATR, Bwr/Swr=BUY/SELL win rates. "
+
+    "Additional keys: "  # PRICE-STRUCTURE
+    "STRUCT=price structure (UPTREND/DOWNTREND/RANGE), "
+    "SLOPE_M15=EMA20 slope on M15 (UP/DOWN/FLAT), "
+    "SLOPE_H1=EMA20 slope on H1 (UP/DOWN/FLAT), "
+    "CH_POS=price position in channel (TOP/MID/BOTTOM). "
+
+    "PRIORITY RULE: "  # PRICE-STRUCTURE
+    "If STRUCT=DOWNTREND and CH_POS=TOP → SELL is favored. "
+    "If STRUCT=UPTREND and CH_POS=BOTTOM → BUY is favored. "
+    "If STRUCT=RANGE → require stronger indicator alignment "
+    "before acting, CONF must be 70+ to trade a range. "
 
     "Response MUST be strict JSON only, no extra text: "
     '{"DIR":"BUY|SELL|HOLD", "LOT":0.0, "TP":float, '
@@ -84,8 +96,6 @@ MAX_DAILY_DRAWDOWN: float = float(os.getenv("MAX_DAILY_DRAWDOWN", "10.0"))  # Lu
 MIN_CONFIDENCE: int = int(os.getenv("MIN_CONFIDENCE", "55"))  # Abaissé à 55% pour plus d'activité
 MAX_SIMULTANEOUS_TRADES: int = int(os.getenv("MAX_SIMULTANEOUS_TRADES", "2"))
 MIN_RR: float = 1.3  # Relevé à 1.3
-# MIGRATION-EURUSD : Spread max adapté EUR/USD (très liquide) — 15 pips = 150 points
-MAX_SPREAD_POINTS: int = 150  # GARDE-FOU SPREAD EUR/USD : 15 pips = 150 points (1 pip = 10 points)
 NEWS_BLOCK_WINDOW: int = 20  # GARDE-FOU NEWS : ±20 min autour des news majoritairement impactantes
 
 # ──────────────────────────────────────────────
@@ -111,9 +121,9 @@ MAX_SL_PIPS: int = 50            # SL maximum 50 pips
 # ──────────────────────────────────────────────
 # Filtres de Protection (Spread & Calendrier)
 # ──────────────────────────────────────────────
-# MIGRATION-EURUSD : Spread en pips EUR/USD (1 pip = 10 points sur Exness)
-# Normal=150pts(15pips), Aggro=250pts(25pips), Safe=100pts(10pips)
-MAX_SPREAD_POINTS: int = 150       # MIGRATION-EURUSD : 15 pips = 150 points (normal)
+# HOTFIX-2 — Spread en PIPS EUR/USD (formule utils.py : (ask-bid)/(point*10))
+# Normal=15 pips, Aggro=25 pips, Safe=10 pips — 1 pip = 0.0001 sur EUR/USD Exness
+MAX_SPREAD_POINTS: int = 15       # HOTFIX-2 : 15 pips (valeur directe en pips, pas en points)
 BLOCK_NEWS_IMPORTANCE: int = 3    # 3 = Haute importance (NFP, CPI, Fed)
 NEWS_CHECK_WINDOW_MINS: int = 30  # ±30 min avant/après une news majeure
 
