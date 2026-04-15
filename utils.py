@@ -278,14 +278,14 @@ def compute_indicators(df: pd.DataFrame) -> dict:
         return {
             "rsi":       round(rsi.iloc[-1], 1),
             "macd":      "+" if macd_hist.iloc[-1] > 0 else "-",
-            "macd_val":  round(macd_hist.iloc[-1], 4),
+            "macd_val":  round(macd_hist.iloc[-1], 5),
             "ema_trend": ema_trend,
-            "ema20":     round(last_ema20, 2),
-            "ema50":     round(last_ema50, 2),
-            "ema200":    round(last_ema200, 2),
+            "ema20":     round(last_ema20, 5),   # FIX-PRECISION : 5 décimales pour FX
+            "ema50":     round(last_ema50, 5),
+            "ema200":    round(last_ema200, 5),
             "bb_pos":    bb_pos,
-            "atr":       round(atr.iloc[-1], 2),
-            "close":     round(last_close, 2),
+            "atr":       round(atr.iloc[-1], 5), # FIX-PRECISION : Crucial pour EUR/USD
+            "close":     round(last_close, 5),
         }
     except Exception as exc:
         bot_log.error("Exception compute_indicators : %s", exc)
@@ -586,13 +586,14 @@ def compress_data(data: dict, context: dict = None) -> str:
         # R=RSI, M=MACD, B=Bollinger, E=EMA_trend, A=ATR
         def tf_str(tf: str) -> str:
             ind = data[tf]["ind"]
+            # FIX-PRECISION — On affiche l'ATR avec ses décimales pour l'IA
             return (
                 f"{tf}:"
-                f"R={ind['rsi']},"      # AUDIT-FIX #1 : RSI= → R=
-                f"M={ind['macd']},"     # AUDIT-FIX #1 : MACD= → M=
-                f"B={ind['bb_pos']},"   # AUDIT-FIX #1 : Bollinger= → B=
-                f"E={ind['ema_trend']},"  # AUDIT-FIX #1 : EMA_trend= → E=
-                f"A={ind['atr']}"       # AUDIT-FIX #1 : ATR= → A=
+                f"R={ind['rsi']},"
+                f"M={ind['macd']},"
+                f"B={ind['bb_pos']},"
+                f"E={ind['ema_trend']},"
+                f"A={ind['atr']:.5f}" 
             )
 
         parts.append(tf_str("M15"))
