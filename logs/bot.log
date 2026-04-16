@@ -1,0 +1,27 @@
+[2026-04-14 19:22:06] [INFO] ╔══════════════════════════════╗
+[2026-04-14 19:22:06] [INFO] ║      GOLDBOT  démarrage      ║
+[2026-04-14 19:22:06] [INFO] ╚══════════════════════════════╝
+[2026-04-14 19:22:06] [INFO] MT5 connecté — compte #435359892 | solde 37.61 USD
+[2026-04-14 19:22:11] [INFO] Thread de trading démarré.
+[2026-04-14 19:22:11] [INFO] Boucle de surveillance (Gestion Active + TP/SL) démarrée.
+[2026-04-14 19:22:11] [INFO] Lancement du polling Telegram (PTB v21)…
+[2026-04-14 19:22:11] [INFO] Boucle principale démarrée. Intervalle : 15 min.
+[2026-04-14 19:22:11] [INFO] ═══ Début du cycle de trading ═══
+[2026-04-14 19:22:15] [INFO] Données collectées — prix=4840.62 | balance=37.61$
+[2026-04-14 19:22:15] [INFO] AUDIT-FIX #3 — start_balance initialisé : 37.61$
+[2026-04-14 19:22:15] [INFO] Filtre pré-IA | mode=normal | spread_max=500 | min_conf=62 | trend=OFF
+[2026-04-14 19:22:15] [INFO] Trend: BUY | Spread=307 | mode=normal | Heure=19:22
+[2026-04-14 19:22:15] [INFO] Filtre pré-IA → OK
+[2026-04-14 19:22:15] [INFO] Données compressées : CTX:L3=None,WB=BULL,SR=[4857.31, 5044.47, 4644.27],BUY_wr=50%,SELL_wr=50%|XAU|M15:R=70.8,M=+,B=high,E=bull,A=9.5|H1:R=73.9,M=+,B=high,E=bull,A=19.85|H4:R=65.8,M=+,E=bull,SR=4857.31/4698.13|D1:bias=bull,R=54.3|bal=37USD|sess=NY+NY|DXY:-0.22%|news:N/A|price=4840.616
+[2026-04-14 19:22:20] [ERROR] Tentative 1/5 échouée : 1 validation error for AISignal
+REASON
+  String should have at most 100 characters [type=string_too_long, input_value='Mixed signals: RSI overb... win rates equal at 50%', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.6/v/string_too_long
+[2026-04-14 19:22:27] [ERROR] Tentative 2/5 échouée : 1 validation error for AISignal
+REASON
+  String should have at most 100 characters [type=string_too_long, input_value='mixed signals: M15/H1 in...t across all timeframes', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.6/v/string_too_long
+[2026-04-14 19:22:35] [ERROR] Tentative 3/5 échouée : 1 validation error for AISignal
+REASON
+  String should have at most 100 characters [type=string_too_long, input_value='mixed signals: M15/H1 in...gnment for clear signal', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.6/v/string_too_long

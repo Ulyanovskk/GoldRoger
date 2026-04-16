@@ -1,33 +1,34 @@
-# Secrets — NE JAMAIS committer
+# ─── SECRETS — NE JAMAIS COMMITTER ───────────────────────────
 .env
 
-# Cache Python
+# ─── CACHE PYTHON ─────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
 *.pyc
 
-# Environnements virtuels
+# ─── ENVIRONNEMENTS VIRTUELS ──────────────────────────────────
 venv/
 .venv/
 env/
 .env_backup
 
-# Logs (potentiellement sensibles)
-logs/
-
-# IDE
+# ─── IDE ──────────────────────────────────────────────────────
 .vscode/
 .idea/
 *.swp
 *.swo
 
-# Distribution / packaging
+# ─── DISTRIBUTION ─────────────────────────────────────────────
 dist/
 build/
 *.egg-info/
 
-# OS
+# ─── OS ───────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
+
+# ─── DONNÉES SYNCHRONISÉES (TOUT INCLUS) ──────────────────────
+# Les logs, Excel, rapports et cache sont suivis pour sync VPS ↔ Local
+# Rien n'est exclu sauf .env et __pycache__

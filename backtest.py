@@ -124,7 +124,9 @@ async def ai_decision(prompt_data: str) -> dict:
         ]
     }
 
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with httpx.AsyncClient(
+        timeout=httpx.Timeout(connect=10.0, read=20.0, write=10.0, pool=5.0)
+    ) as client:
         response = await client.post(
             "https://openrouter.ai/api/v1/chat/completions",
             headers=headers,
@@ -779,7 +781,7 @@ async def run_backtest(symbol: str = "EURUSDm",
                 trade["pnl"], trade["pnl_pips"], trade["result"], balance
             )
 
-        # BACKTEST-AI : Progression
+        # BACKTEST-AI : Progression + Sauvegarde partielle toutes les 10 trades
         done += 1
         if done % 50 == 0:
             pct = done / total * 100
@@ -790,6 +792,19 @@ async def run_backtest(symbol: str = "EURUSDm",
                 f"API: {api_calls} | Cache: {cache_hits} | "
                 f"Skipped: {skipped}"
             )
+
+        # Sauvegarde partielle des trades toutes les 10 trades (crash-safe)
+        if len(trades) > 0 and len(trades) % 10 == 0:
+            partial_file = "trades_partial.json"
+            with open(partial_file, 'w', encoding='utf-8') as f:
+                json.dump({
+                    "trades": trades,
+                    "balance": balance,
+                    "api_calls": api_calls,
+                    "cache_hits": cache_hits,
+                    "progress_pct": round(done / total * 100, 1)
+                }, f, ensure_ascii=False)
+            log.debug("Sauvegarde partielle : %d trades → trades_partial.json", len(trades))
 
     # BACKTEST-AI : Résumé final
     log.info("Backtest terminé ! %d trades | Balance finale : %.2f$ | API calls : %d | Cache hits : %d",
@@ -841,12 +856,39 @@ if __name__ == "__main__":
                 min_conf=args.conf,
             )
         )
-
-        # BACKTEST-AI : Rapport de performance
+        # BACKTEST-AI : Rapport de performance final
         print_report(trades, final_bal, args.balance)
 
     except KeyboardInterrupt:
-        print("\n\n  ⚠️ Backtest interrompu par l'utilisateur.\n")
+        print("\n\n  ⚠️  Backtest interrompu — génération du rapport partiel...\n")
+        # Charger les trades partiels sauvegardés si disponibles
+        partial_file = "trades_partial.json"
+        if os.path.exists(partial_file):
+            with open(partial_file, 'r', encoding='utf-8') as f:
+                partial = json.load(f)
+            trades_partial = partial.get("trades", [])
+            balance_partial = partial.get("balance", args.balance)
+            progress    = partial.get("progress_pct", 0)
+            if trades_partial:
+                print(f"  📂 {len(trades_partial)} trades récupérés depuis trades_partial.json ({progress:.1f}% du backtest)")
+                print_report(trades_partial, balance_partial, args.balance)
+            else:
+                print("  ❌ Aucun trade partiel disponible.")
+        else:
+            print("  ❌ Aucune sauvegarde partielle trouvée (trades_partial.json absent).")
+
+    except Exception as e:
+        log.error("Erreur fatale : %s", e)
+        # Tenter de générer un rapport de secours
+        partial_file = "trades_partial.json"
+        if os.path.exists(partial_file):
+            with open(partial_file, 'r', encoding='utf-8') as f:
+                partial = json.load(f)
+            trades_partial = partial.get("trades", [])
+            balance_partial = partial.get("balance", args.balance)
+            if trades_partial:
+                print(f"\n  ⚠️  Crash détecté — rapport de secours sur {len(trades_partial)} trades")
+                print_report(trades_partial, balance_partial, args.balance)
 
     finally:
         mt5.shutdown()

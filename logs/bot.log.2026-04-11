@@ -1,0 +1,57 @@
+[2026-04-11 14:27:34] [INFO] ╔══════════════════════════════╗
+[2026-04-11 14:27:34] [INFO] ║      GOLDBOT  démarrage      ║
+[2026-04-11 14:27:34] [INFO] ╚══════════════════════════════╝
+[2026-04-11 14:27:40] [INFO] MT5 connecté — compte #435359892 | solde 50.00 USD
+[2026-04-11 14:27:43] [INFO] Boucle principale démarrée. Intervalle : 15 min.
+[2026-04-11 14:27:43] [INFO] Thread de trading démarré.
+[2026-04-11 14:27:43] [INFO] ═══ Début du cycle de trading ═══
+[2026-04-11 14:27:43] [INFO] Lancement du polling Telegram (PTB v21)…
+[2026-04-11 14:27:43] [INFO] Bot arrêté — cycle ignoré.
+[2026-04-11 14:27:43] [INFO] Prochain cycle dans 137 secondes.
+[2026-04-11 14:29:12] [INFO] Bot démarré via commande Telegram /start.
+[2026-04-11 14:30:00] [INFO] ═══ Début du cycle de trading ═══
+[2026-04-11 14:30:00] [ERROR] Aucune donnée MT5 pour BTCUSD/M15
+[2026-04-11 14:30:00] [ERROR] Données manquantes pour M15
+[2026-04-11 14:30:00] [ERROR] Collecte de données échouée. Cycle ignoré.
+[2026-04-11 14:30:00] [INFO] Prochain cycle dans 900 secondes.
+[2026-04-11 14:34:17] [INFO] Signal 2 reçu — arrêt du bot…
+[2026-04-11 14:34:18] [INFO] MT5 déconnecté.
+[2026-04-11 14:34:18] [CRITICAL] Erreur fatale dans la boucle de trading : Event loop stopped before Future completed.
+Traceback (most recent call last):
+  File "C:\Users\bckwdy\Desktop\GOLDBOT\bot.py", line 395, in _run_trading_loop
+    loop.run_until_complete(main_loop())
+  File "C:\Users\bckwdy\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py", line 651, in run_until_complete
+    raise RuntimeError('Event loop stopped before Future completed.')
+RuntimeError: Event loop stopped before Future completed.
+[2026-04-11 14:34:19] [INFO] MT5 déconnecté.
+[2026-04-11 14:34:19] [INFO] GOLDBOT arrêté proprement.
+[2026-04-11 14:35:32] [INFO] ╔══════════════════════════════╗
+[2026-04-11 14:35:32] [INFO] ║      GOLDBOT  démarrage      ║
+[2026-04-11 14:35:32] [INFO] ╚══════════════════════════════╝
+[2026-04-11 14:35:32] [INFO] MT5 connecté — compte #435359892 | solde 50.00 USD
+[2026-04-11 14:35:33] [INFO] Boucle principale démarrée. Intervalle : 15 min.
+[2026-04-11 14:35:33] [INFO] Thread de trading démarré.
+[2026-04-11 14:35:33] [INFO] ═══ Début du cycle de trading ═══
+[2026-04-11 14:35:33] [INFO] Lancement du polling Telegram (PTB v21)…
+[2026-04-11 14:35:33] [INFO] Bot arrêté — cycle ignoré.
+[2026-04-11 14:35:33] [INFO] Prochain cycle dans 567 secondes.
+[2026-04-11 14:35:50] [INFO] Bot démarré via commande Telegram /start.
+[2026-04-11 16:45:01] [INFO] ═══ Début du cycle de trading ═══
+[2026-04-11 16:45:25] [INFO] Données collectées — prix=72706.89 | balance=50.00$
+[2026-04-11 16:45:25] [INFO] Filtre pré-IA → SKIP : Timeframes non alignés (M15/H1/H4)
+[2026-04-11 16:45:25] [INFO] Prochain cycle dans 875 secondes.
+[2026-04-11 17:00:00] [INFO] ═══ Début du cycle de trading ═══
+[2026-04-11 17:00:00] [INFO] Données collectées — prix=72737.73 | balance=50.00$
+[2026-04-11 17:00:00] [INFO] Filtre pré-IA → SKIP : Timeframes non alignés (M15/H1/H4)
+[2026-04-11 17:00:00] [INFO] Prochain cycle dans 900 secondes.
+[2026-04-11 17:13:39] [INFO] Signal 2 reçu — arrêt du bot…
+[2026-04-11 17:13:40] [INFO] MT5 déconnecté.
+[2026-04-11 17:13:41] [CRITICAL] Erreur fatale dans la boucle de trading : Event loop stopped before Future completed.
+Traceback (most recent call last):
+  File "C:\Users\bckwdy\Desktop\GOLDBOT\bot.py", line 395, in _run_trading_loop
+    loop.run_until_complete(main_loop())
+  File "C:\Users\bckwdy\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py", line 651, in run_until_complete
+    raise RuntimeError('Event loop stopped before Future completed.')
+RuntimeError: Event loop stopped before Future completed.
+[2026-04-11 17:13:41] [INFO] MT5 déconnecté.
+[2026-04-11 17:13:41] [INFO] GOLDBOT arrêté proprement.
