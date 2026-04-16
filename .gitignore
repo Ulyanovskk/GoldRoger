@@ -31,3 +31,7 @@ build/
 # OS
 .DS_Store
 Thumbs.db
+
+# Backtest (BACKTEST-AI)
+backtest_cache.json
+backtest_report_*.json
